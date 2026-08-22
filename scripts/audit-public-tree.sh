@@ -1,0 +1,97 @@
+#!/bin/sh
+
+set -eu
+
+project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+private_ipv4_pattern='10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}'
+private_pattern='/home/[^/:[:space:]]+/|/Users/[^/:[:space:]]+/|[A-Za-z]:\\Users\\[^\\:[:space:]]+\\|BEGIN [A-Z0-9 ]*PRIVATE KEY|ssh-(rsa|ed25519) AAAA|tailscale|@omarchy|Galaxy S25|warranty-waiver token|github_pat_[[:alnum:]_]{20,}|gh[oprsu]_[[:alnum:]]{20,}'
+
+for command in find grep sh; do
+	command -v "$command" >/dev/null 2>&1 || {
+		echo "Missing required command: $command" >&2
+		exit 1
+	}
+done
+
+forbidden_files=$(find "$project" \
+	\( -path "$project/.git" -o -path "$project/work" -o -path "$project/artifacts" \) \
+	-prune -o -type f \( \
+	-name '*.bin' -o -name '*.img' -o -name '*.ubi' -o -name '*.tar' \
+	-o -name '*.tar.gz' -o -name 'authorized_keys' -o -name 'caldata.bin' \
+	-o -name 'cal-ahb-*.bin' -o -iname '*art*backup*' -o -iname '*serial*capture*' \
+	\) -print)
+
+[ -z "$forbidden_files" ] || {
+	echo 'Refusing: forbidden private or binary files found:' >&2
+	printf '%s\n' "$forbidden_files" >&2
+	exit 1
+}
+
+if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
+	--exclude='audit-public-tree.sh' \
+	--exclude='verify-artifacts.sh' \
+	"$private_pattern" \
+	"$project" >/dev/null; then
+	echo 'Refusing: private identity, key, path, or token material found.' >&2
+	exit 1
+fi
+
+if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
+	--exclude='audit-public-tree.sh' "$private_ipv4_pattern" \
+	"$project" >/dev/null; then
+	echo 'Refusing: private IPv4 address found.' >&2
+	exit 1
+fi
+
+if command -v git >/dev/null 2>&1 && \
+	git -C "$project" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	if git -C "$project" log --all -p -- . \
+		':(exclude)scripts/audit-public-tree.sh' \
+		':(exclude)scripts/verify-artifacts.sh' | \
+		grep -Ea "$private_pattern" >/dev/null; then
+		echo 'Refusing: Git history contains private identity, key, path, or token material.' >&2
+		exit 1
+	fi
+
+	if git -C "$project" log --all -p -- . \
+		':(exclude)scripts/audit-public-tree.sh' | \
+		grep -Ea "$private_ipv4_pattern" >/dev/null; then
+		echo 'Refusing: Git history contains a private IPv4 address.' >&2
+		exit 1
+	fi
+
+	if git -C "$project" rev-list --objects --all | \
+		grep -Eai '\.(bin|img|ubi|tar|tar\.gz)$|(^|/)(authorized_keys|caldata\.bin|cal-ahb-[^ ]*\.bin)$' \
+		>/dev/null; then
+		echo 'Refusing: Git history contains a forbidden binary or private filename.' >&2
+		exit 1
+	fi
+fi
+
+if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
+	--exclude='audit-public-tree.sh' \
+	'([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' "$project" >/dev/null; then
+	echo 'Refusing: literal MAC address found.' >&2
+	exit 1
+fi
+
+large_files=$(find "$project" \
+	\( -path "$project/.git" -o -path "$project/work" -o -path "$project/artifacts" \) \
+	-prune -o -type f -size +1M -print)
+[ -z "$large_files" ] || {
+	echo 'Refusing: files larger than 1 MiB found in source tree:' >&2
+	printf '%s\n' "$large_files" >&2
+	exit 1
+}
+
+find "$project/scripts" "$project/overlay" -type f \( \
+	-name '*.sh' -o -path '*/etc/uci-defaults/*' -o -path '*/root/*' \
+	\) -exec sh -n {} \;
+
+if command -v shellcheck >/dev/null 2>&1; then
+	find "$project/scripts" "$project/overlay" -type f \( \
+		-name '*.sh' -o -path '*/etc/uci-defaults/*' -o -path '*/root/*' \
+		\) -exec shellcheck -x {} +
+fi
+
+echo 'Public-tree audit passed.'

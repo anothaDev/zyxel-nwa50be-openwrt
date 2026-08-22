@@ -1,0 +1,17 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] qca-ssdk-shell: keep nested build serial
+
+The upstream source Makefile generates dependency files during failed build
+passes and cannot safely run its nested module builds through a parallel GNU
+make jobserver. Keep only that downloaded source build at -j1. OpenWrt may
+still schedule every other package in parallel.
+
+This changes the BSD-licensed TIP package wrapper, not Qualcomm source.
+
+--- a/feeds/qca-wifi-7/qca-ssdk-shell/Makefile
++++ b/feeds/qca-wifi-7/qca-ssdk-shell/Makefile
+@@ -46,3 +46,3 @@
+ define Build/Compile
+-	$(MAKE) -C $(PKG_BUILD_DIR) $(strip $(QCASSDK_CONFIG_OPTS))
++	$(MAKE) -j1 -C $(PKG_BUILD_DIR) $(strip $(QCASSDK_CONFIG_OPTS))
+ endef

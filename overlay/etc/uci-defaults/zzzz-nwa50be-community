@@ -1,0 +1,124 @@
+#!/bin/sh
+
+set -u
+
+disable_service() {
+	service="$1"
+	if [ -x "/etc/init.d/$service" ]; then
+		"/etc/init.d/$service" disable >/dev/null 2>&1 || true
+		"/etc/init.d/$service" stop >/dev/null 2>&1 || true
+	fi
+}
+
+enable_service() {
+	service="$1"
+	if [ -x "/etc/init.d/$service" ]; then
+		"/etc/init.d/$service" enable >/dev/null 2>&1 || true
+	fi
+}
+
+soc_serial="$(cat /sys/devices/soc0/serial_number 2>/dev/null || true)"
+serial_hash="$(printf '%s' "$soc_serial" | sha256sum 2>/dev/null | cut -c1-8 || true)"
+mac_prefix="$(printf '%s\n' "$serial_hash" | sed -n 's/^\(..\)\(..\)\(..\)\(..\)$/02:\1:\2:\3:\4/p')"
+
+for service in \
+	atfpolicy bridger cloud_discover cpm dataplane dhcpinject dhcprelay \
+	dhcpsnoop dnssnoop ieee8021x igmpproxy lldpd mpskd onlinecheck qosify \
+	radius radius-gw-proxy radsecproxy ratelimit rrmd rtty spotfilter \
+	switch-fabric ucentral ucentral-event ucentral-gps ucentral-state \
+	ucentral-wifiscan udevmand udevstats ufp ugps umdns uspot usteer; do
+	disable_service "$service"
+done
+
+for service in dnsmasq odhcpd dropbear rpcd uhttpd; do
+	disable_service "$service"
+done
+
+for service in firewall sysntpd; do
+	enable_service "$service"
+done
+
+for section in lan lan_bridge eth0_device; do
+	uci -q delete "network.$section"
+done
+
+uci -q set network.eth0_device='device'
+uci -q set network.eth0_device.name='eth0'
+[ -n "$mac_prefix" ] && uci -q set "network.eth0_device.macaddr=${mac_prefix}:01"
+
+uci -q set network.lan_bridge='device'
+uci -q set network.lan_bridge.name='br-lan'
+uci -q set network.lan_bridge.type='bridge'
+uci -q set network.lan_bridge.stp='0'
+uci -q set network.lan_bridge.igmp_snooping='1'
+uci -q add_list network.lan_bridge.ports='eth0'
+[ -n "$mac_prefix" ] && uci -q set "network.lan_bridge.macaddr=${mac_prefix}:01"
+
+uci -q set network.lan='interface'
+uci -q set network.lan.device='br-lan'
+uci -q set network.lan.proto='dhcp'
+uci -q set network.lan.delegate='0'
+uci -q commit network
+
+while uci -q get firewall.@zone[0] >/dev/null 2>&1; do
+	uci -q delete firewall.@zone[0]
+done
+uci -q delete firewall.lan
+uci -q set firewall.lan='zone'
+uci -q set firewall.lan.name='lan'
+uci -q add_list firewall.lan.network='lan'
+uci -q set firewall.lan.input='ACCEPT'
+uci -q set firewall.lan.output='ACCEPT'
+uci -q set firewall.lan.forward='ACCEPT'
+uci -q commit firewall
+
+uci -q set system.@system[0].hostname='nwa50be-openwrt'
+uci -q set system.@system[0].timezone='UTC0'
+uci -q set system.@system[0].zonename='UTC'
+uci -q commit system
+
+uci -q set luci.main.mediaurlbase='/luci-static/bootstrap'
+uci -q commit luci
+
+uci -q delete uhttpd.main
+uci -q set uhttpd.main='uhttpd'
+uci -q add_list uhttpd.main.listen_http='0.0.0.0:80'
+uci -q add_list uhttpd.main.listen_http='[::]:80'
+uci -q add_list uhttpd.main.listen_https='0.0.0.0:443'
+uci -q add_list uhttpd.main.listen_https='[::]:443'
+uci -q set uhttpd.main.redirect_https='1'
+uci -q set uhttpd.main.home='/www'
+uci -q set uhttpd.main.rfc1918_filter='1'
+uci -q set uhttpd.main.max_requests='3'
+uci -q set uhttpd.main.max_connections='100'
+uci -q set uhttpd.main.cert='/etc/uhttpd.crt'
+uci -q set uhttpd.main.key='/etc/uhttpd.key'
+uci -q set uhttpd.main.cgi_prefix='/cgi-bin'
+uci -q add_list uhttpd.main.lua_prefix='/cgi-bin/luci=/usr/lib/lua/luci/sgi/uhttpd.lua'
+uci -q set uhttpd.main.script_timeout='60'
+uci -q set uhttpd.main.network_timeout='30'
+uci -q set uhttpd.main.http_keepalive='20'
+uci -q set uhttpd.main.tcp_keepalive='1'
+uci -q commit uhttpd
+
+if [ ! -s /etc/config/wireless ] && command -v wifi >/dev/null 2>&1; then
+	wifi config >/dev/null 2>&1 || true
+fi
+
+for iface in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-iface$/\1/p"); do
+	uci -q delete "wireless.$iface"
+done
+
+for radio in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
+	uci -q delete "wireless.$radio.country"
+	uci -q set "wireless.$radio.disabled=1"
+	case "$radio" in
+		radio0) [ -n "$mac_prefix" ] && uci -q set "wireless.$radio.macaddr_base=${mac_prefix}:10" ;;
+		radio1) [ -n "$mac_prefix" ] && uci -q set "wireless.$radio.macaddr_base=${mac_prefix}:20" ;;
+	esac
+done
+
+uci -q commit wireless
+wifi down >/dev/null 2>&1 || true
+
+exit 0

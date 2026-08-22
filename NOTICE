@@ -1,0 +1,12 @@
+This project is not affiliated with or endorsed by Zyxel Networks, Qualcomm,
+Telecom Infra Project, or the OpenWrt project.
+
+Zyxel and NWA50BE are trademarks of their respective owner.
+
+Original project documentation and helper scripts are licensed under the
+BSD-3-Clause license in LICENSE. Patch files modify upstream works and remain
+subject to the licenses of the files they modify. The build consumes the
+Telecom Infra Project OpenWiFi tree and OpenWrt; see docs/LICENSING.md.
+
+No Qualcomm firmware blobs, device ART data, calibration data, credentials,
+unlock tokens, or prebuilt firmware images are distributed by this repository.

@@ -1,0 +1,20 @@
+#!/bin/sh
+
+[ "$ACTION" = 'add' ] || exit 0
+
+case "$DEVICENAME" in
+	phy2g-ap*|phy5g-ap*|phy6g-ap*) ;;
+	*) exit 0 ;;
+esac
+
+(
+	for delay in 0 1 1 2 3; do
+		sleep "$delay"
+		/usr/sbin/bridge link set dev "$DEVICENAME" isolated on 2>/dev/null && {
+			logger -t nwa50be-isolation "$DEVICENAME isolated from other wireless bridge ports"
+			exit 0
+		}
+	done
+
+	logger -t nwa50be-isolation "failed to isolate $DEVICENAME"
+) &

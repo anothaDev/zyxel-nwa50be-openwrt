@@ -1,0 +1,22 @@
+From: NWA50BE recovery-kit build guard
+Subject: [PATCH] ipq53xx: use the central initramfs device list
+
+TIP's ipq53xx target is linked from an external feed that also contains an
+empty linux/generic directory.  GENERIC_PLATFORM_DIR therefore points into
+that feed, where image/initramfs-base-files.txt does not exist.  The nested
+kernel build fails, while the surrounding lock helper continues and packages
+a stale kernel.
+
+Override the generic initramfs node list with the file shipped by the pinned
+OpenWrt tree.
+
+--- a/feeds/qca-wifi-7/ipq53xx/Makefile
++++ b/feeds/qca-wifi-7/ipq53xx/Makefile
+@@ -11,6 +11,7 @@ SUBTARGETS:=generic ipq53xx_32
+ 
+ KERNELNAME:=Image dtbs
+ KERNEL_PATCHVER:=6.6
++INITRAMFS_EXTRA_FILES:=$(TOPDIR)/target/linux/generic/image/initramfs-base-files.txt
+ #KERNEL_NAME_SUFFIX=-0c8ca76b942082e176fe07ddf18a7a5413b1612a
+ 
+ include $(INCLUDE_DIR)/target.mk

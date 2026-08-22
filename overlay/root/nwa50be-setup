@@ -1,0 +1,69 @@
+#!/bin/sh
+
+set -eu
+
+if [ ! -t 0 ]; then
+	echo 'Run this helper interactively from the serial console.' >&2
+	exit 1
+fi
+
+printf 'ISO country code for this installation (example: IT): '
+IFS= read -r country
+country="$(printf '%s' "$country" | tr '[:lower:]' '[:upper:]')"
+
+case "$country" in
+	[A-Z][A-Z]) ;;
+	*)
+		echo 'Country must be exactly two ASCII letters.' >&2
+		exit 1
+		;;
+esac
+
+echo 'Set the root password used by LuCI:'
+passwd
+
+for radio in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
+	uci -q set "wireless.$radio.country=$country"
+	uci -q set "wireless.$radio.disabled=1"
+done
+uci -q commit wireless
+
+printf 'Enable cross-BSS client isolation after Wi-Fi is configured? [y/N]: '
+IFS= read -r isolate
+case "$isolate" in
+	y|Y|yes|YES)
+		cp /usr/share/nwa50be/99-wireless-isolation \
+			/etc/hotplug.d/net/99-nwa50be-wireless-isolation
+		chmod 0644 /etc/hotplug.d/net/99-nwa50be-wireless-isolation
+		;;
+	*)
+		rm -f /etc/hotplug.d/net/99-nwa50be-wireless-isolation
+		;;
+esac
+
+for service in rpcd uhttpd; do
+	"/etc/init.d/$service" enable
+	"/etc/init.d/$service" restart
+done
+
+if [ -s /etc/dropbear/authorized_keys ]; then
+	uci -q set dropbear.main.enable='1'
+	uci -q commit dropbear
+	/etc/init.d/dropbear enable
+	/etc/init.d/dropbear restart
+else
+	echo 'SSH remains disabled because no authorized_keys file is installed.'
+fi
+
+touch /etc/nwa50be-setup-complete
+
+address="$(ubus call network.interface.lan status 2>/dev/null | \
+	jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || true)"
+
+echo
+echo 'Initial setup complete. Radios remain disabled.'
+if [ -n "$address" ]; then
+	echo "Open LuCI at https://$address/ and configure SSIDs deliberately."
+else
+	echo 'Check the upstream DHCP server for the nwa50be-openwrt lease.'
+fi

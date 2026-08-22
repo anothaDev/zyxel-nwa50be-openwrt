@@ -1,0 +1,69 @@
+diff --git a/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts b/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts
+--- a/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts
++++ b/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts
+@@ -328,6 +328,7 @@
+ 
+ 	chosen {
+ 		stdout-path = "serial0";
++		bootargs-append = " mtdparts=qcom_nand.0:512k(0:TRAINING)ro,256k(0:LICENSE)ro,60m(rootfs),60m(rootfs_1)ro";
+ 	};
+ 
+ 	soc@0 {
+@@ -705,6 +705,35 @@
+ 		nand-ecc-strength = <8>;
+ 		nand-ecc-step-size = <512>;
+ 		nand-bus-width = <8>;
++
++		partitions {
++			compatible = "fixed-partitions";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			partition@0 {
++				label = "0:TRAINING";
++				reg = <0x00000000 0x00080000>;
++				read-only;
++			};
++
++			partition@80000 {
++				label = "0:LICENSE";
++				reg = <0x00080000 0x00040000>;
++				read-only;
++			};
++
++			partition@c0000 {
++				label = "rootfs";
++				reg = <0x000c0000 0x03c00000>;
++			};
++
++			partition@3cc0000 {
++				label = "rootfs_1";
++				reg = <0x03cc0000 0x03c00000>;
++				read-only;
++			};
++		};
+ 	};
+ };
+ 
+@@ -1005,17 +1005,17 @@
+ };
+ 
+ /*
+- * RAM-test image safety interlock. The kernel and rootfs are loaded into RAM;
+- * stock SPI NOR and NAND must not be exposed to Linux at all.
++ * Keep bootloader, environment, and ART inaccessible from Linux. Persistent
++ * OpenWrt is installed only into the NAND rootfs UBI partition.
+  */
+ &blsp1_spi0 {
+ 	status = "disabled";
+ };
+ 
+ &qpic_bam {
+-	status = "disabled";
++	status = "okay";
+ };
+ 
+ &qpic_nand {
+-	status = "disabled";
++	status = "okay";
+ };

@@ -1,0 +1,18 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] qca-nss-phy: ignore empty package probe
+
+OpenWrt's rootfs assembly sources the init helper without an argument. Do not
+fall through to its undefined fatal helper for that packaging probe. Runtime
+load behavior and diagnostics for nonempty unknown arguments remain unchanged.
+
+--- a/feeds/qca-wifi-7/qca-nss-phy/files/qca-nss-phy.init
++++ b/feeds/qca-wifi-7/qca-nss-phy/files/qca-nss-phy.init
+@@ -20,6 +20,8 @@ case "$1" in
+ 	load)
+ 		load
+ 		;;
++	'')
++		;;
+ 	*)
+ 		fatal "Parameter $1 unknown"
+ 		;;

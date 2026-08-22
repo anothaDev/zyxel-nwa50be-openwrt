@@ -1,0 +1,67 @@
+name: Build or runtime problem
+description: Report a reproducible NWA50BE build, boot, or runtime problem.
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach ART, flash dumps, calibration, unlock tokens, passwords,
+        keys, serial numbers, MAC addresses, private IP addresses, or complete
+        serial captures. Redact logs before submitting them.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Sensitive-data check
+      options:
+        - label: I removed device identity, credentials, calibration, and private network details.
+          required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Failure stage
+      options:
+        - Source preparation
+        - Compilation
+        - TFTP RAM boot
+        - Sysupgrade validation
+        - Persistent boot
+        - Ethernet
+        - Wireless
+        - LuCI or setup
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Repository commit
+      placeholder: Full Git commit ID
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Include the exact failing command and sanitized error text.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS, tool versions, board revision if known, and connection method.
+    validations:
+      required: true

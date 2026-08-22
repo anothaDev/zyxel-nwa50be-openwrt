@@ -1,0 +1,39 @@
+diff --git a/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh b/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh
+index 92360263..b7e41fd7 100755
+--- a/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh
++++ b/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh
+@@ -1159,7 +1159,7 @@ mac80211_hostapd_setup_bss() {
+ 	append hostapd_cfg "$type=$ifname" "$N"
+ 
+ 	hostapd_set_bss_options hostapd_cfg "$phy" "$vif" || return 1
+-	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp
++	json_get_vars wds wds_bridge dtim_period max_listen_int start_disabled ieee80211w beacon_prot ppe_vp mlo
+ 	json_get_vars unsol_bcast_presp fils_discovery
+ 	json_get_vars enable_epcs ttlm_enable enable_aal ml_max_rec_links enable_scs enable_mscs enable_dscp_policy_capa
+ 	json_get_vars commitatf atfssidsched atfssidgroup
+@@ -1174,6 +1174,7 @@ mac80211_hostapd_setup_bss() {
+ 
+ 	set_default wds 0
+ 	set_default start_disabled 0
++	set_default mlo 0
+ 
+ 	case "$auth_type" in
+ 		psk|sae|psk-sae|owe|eap*|wep|sae-mixed|ft-sae-ext-key)
+@@ -1231,7 +1232,7 @@ mac80211_hostapd_setup_bss() {
+ 	fi
+ 
+ 	if [[ "$htmode" == "EHT"* ]]; then
+-		append hostapd_cfg "mld_ap=1" "$N"
++		[ "$mlo" -eq 1 ] && append hostapd_cfg "mld_ap=1" "$N"
+ 
+ 		if [ -n "$enable_epcs" ]; then
+ 			append hostapd_cfg "enable_epcs=$enable_epcs" "$N"
+@@ -1250,7 +1251,7 @@ mac80211_hostapd_setup_bss() {
+ 		fi
+ 		if [ -n "$ttlm_enable" ]; then
+ 			append hostapd_cfg "ttlm_enable=$ttlm_enable" "$N"
+-		else
++		elif [ "$mlo" -eq 1 ]; then
+ 			append hostapd_cfg "ttlm_enable=1" "$N"
+ 		fi
+ 

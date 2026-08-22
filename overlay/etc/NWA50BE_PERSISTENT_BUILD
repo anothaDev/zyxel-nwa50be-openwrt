@@ -1,0 +1,2 @@
+NWA50BE community OpenWrt persistent build
+SPI NOR remains inaccessible; persistent storage is NAND rootfs UBI only.

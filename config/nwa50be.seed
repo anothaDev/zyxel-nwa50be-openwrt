@@ -1,0 +1,28 @@
+CONFIG_TARGET_ipq53xx=y
+CONFIG_TARGET_ipq53xx_generic=y
+CONFIG_TARGET_ipq53xx_generic_DEVICE_zyxel_nwa50be=y
+CONFIG_TARGET_ROOTFS_INITRAMFS=y
+CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
+CONFIG_PACKAGE_ip-bridge=y
+CONFIG_PACKAGE_luci-ssl-openssl=y
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+CONFIG_PACKAGE_openssl-util=y
+# CONFIG_PACKAGE_luci-theme-ucentral is not set
+# CONFIG_PACKAGE_luci-mod-ucentral is not set
+# CONFIG_PACKAGE_mtd is not set
+# CONFIG_PACKAGE_uboot-envtools is not set
+# CONFIG_PACKAGE_bridger is not set
+# CONFIG_PACKAGE_kmod-sched-bpf is not set
+# CONFIG_PACKAGE_lldpd is not set
+# CONFIG_PACKAGE_qosify is not set
+# CONFIG_PACKAGE_spotfilter is not set
+# CONFIG_PACKAGE_ucode-mod-bpf is not set
+# CONFIG_PACKAGE_udevstats is not set
+# CONFIG_PACKAGE_ufp is not set
+# CONFIG_PACKAGE_uspot is not set
+# CONFIG_KERNEL_DEBUG_INFO is not set
+# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+CONFIG_KERNEL_BUILD_USER="nwa50be"
+CONFIG_KERNEL_BUILD_DOMAIN="local"

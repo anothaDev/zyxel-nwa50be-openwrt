@@ -1,0 +1,3 @@
+ath12k frame_mode=1 cold_boot_cal=0 mlo_capable=0
+ath12k_wifi7
+ath_debug

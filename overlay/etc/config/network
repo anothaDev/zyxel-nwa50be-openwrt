@@ -1,0 +1,20 @@
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option packet_steering '1'
+
+config device 'lan_bridge'
+	option name 'br-lan'
+	option type 'bridge'
+	option stp '0'
+	option igmp_snooping '1'
+	list ports 'eth0'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'dhcp'
+	option delegate '0'

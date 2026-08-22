@@ -1,0 +1,12 @@
+/artifacts/
+/private/
+/work/
+/*.log
+*.bin
+*.img
+*.tar
+*.tar.gz
+*.ubi
+authorized_keys
+caldata.bin
+cal-ahb-*.bin
