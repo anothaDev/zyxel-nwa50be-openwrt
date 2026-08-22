@@ -9,7 +9,11 @@ usage() {
 
 [ "$#" -eq 1 ] || usage
 
-project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project=$(
+	unset CDPATH
+	cd -- "$(dirname -- "$0")/.."
+	pwd
+)
 tree="$1"
 openwrt="$tree/openwrt"
 jobs=${JOBS:-$(nproc)}

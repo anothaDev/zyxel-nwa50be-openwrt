@@ -2,7 +2,11 @@
 
 set -eu
 
-project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project=$(
+	unset CDPATH
+	cd -- "$(dirname -- "$0")/.."
+	pwd
+)
 private_ipv4_pattern='10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}'
 private_pattern='/home/[^/:[:space:]]+/|/Users/[^/:[:space:]]+/|[A-Za-z]:\\Users\\[^\\:[:space:]]+\\|BEGIN [A-Z0-9 ]*PRIVATE KEY|ssh-(rsa|ed25519) AAAA|tailscale|@omarchy|Galaxy S25|warranty-waiver token|github_pat_[[:alnum:]_]{20,}|gh[oprsu]_[[:alnum:]]{20,}'
 

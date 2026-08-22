@@ -9,7 +9,11 @@ usage() {
 
 [ "$#" -eq 2 ] || usage
 
-project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project=$(
+	unset CDPATH
+	cd -- "$(dirname -- "$0")/.."
+	pwd
+)
 tree="$1"
 art="$2"
 
@@ -20,7 +24,7 @@ openwrt_patched_tree='a0fa511453f26becffbde594f46103ab9bad57a7'
 verify_upstream_state() {
 	[ ! -e "$tree/.nwa50be-community-prepared" ]
 	[ "$(git -C "$tree" rev-parse HEAD)" = "$tip_commit" ]
-	[ "$(git -C "$tree/openwrt" rev-parse HEAD^{tree})" = "$openwrt_patched_tree" ]
+	[ "$(git -C "$tree/openwrt" rev-parse 'HEAD^{tree}')" = "$openwrt_patched_tree" ]
 	[ "$(git -C "$tree/openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 124 ]
 
 	root_status=$(git -C "$tree" status --porcelain --untracked-files=all)

@@ -9,7 +9,11 @@ usage() {
 
 [ "$#" -eq 1 ] || usage
 
-project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project=$(
+	unset CDPATH
+	cd -- "$(dirname -- "$0")/.."
+	pwd
+)
 tree="$1"
 openwrt="$tree/openwrt"
 dts="$tree/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts"
@@ -18,7 +22,7 @@ overlay="$openwrt/files"
 [ -f "$tree/.nwa50be-community-prepared" ]
 [ "$(cat "$tree/.nwa50be-community-prepared")" = '122d893d88a6762bffeac54c5f87b37407cefe7a' ]
 [ "$(git -C "$tree" rev-parse HEAD)" = '122d893d88a6762bffeac54c5f87b37407cefe7a' ]
-[ "$(git -C "$openwrt" rev-parse HEAD^{tree})" = 'a0fa511453f26becffbde594f46103ab9bad57a7' ]
+[ "$(git -C "$openwrt" rev-parse 'HEAD^{tree}')" = 'a0fa511453f26becffbde594f46103ab9bad57a7' ]
 [ "$(git -C "$openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 124 ]
 
 for feed_pin in \
@@ -90,7 +94,10 @@ for symbol in \
 	CONFIG_PACKAGE_kmod-qca-nss-ecm-wifi-plugin \
 	CONFIG_PACKAGE_cig-device-boot \
 	CONFIG_PACKAGE_kmod-usb-serial-xr; do
-	! grep -q "^${symbol}=y$" "$openwrt/.config"
+	if grep -q "^${symbol}=y$" "$openwrt/.config"; then
+		echo "Refusing: unsupported package is selected: $symbol" >&2
+		exit 1
+	fi
 done
 for symbol in \
 	CONFIG_PACKAGE_bridger \
