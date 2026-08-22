@@ -28,12 +28,20 @@ because committer metadata changes it without changing source content.
 | `0008` | Force only the nested qca-ssdk-shell source build to remain serial. |
 | `0009` | Ignore qca-nss-phy's empty package-assembly init-script probe. |
 | `0010` | Keep absolute external-feed paths out of APK package-origin metadata. |
+| `0011` | Backport OpenWrt 25.12.5's uhttpd update past three request-smuggling fixes. |
+| `0012` | Backport OpenWrt 25.12.5's OpenSSL 3.5.7 security update. |
+| `0013` | Remove TIP's public development root password before first boot. |
+| `0014` | Remove LuCI's package-manager dependency for this downstream target. |
+| `0015` | Select the SSDK profile init script without modifying tracked source. |
+| `0016` | Disable unused OpenSSL QUIC code, removing the CVE-2026-14456 attack surface. |
 
-`qca-ssdk-shell` has a broken generated-dependency bootstrap. The build runs it
-at `-j1` for at most six passes before the parallel build. Each permitted failed
-pass must generate dependencies and end on the exact missing-`.d` rule; any
-compiler or linker error aborts immediately. A clean tree succeeded on pass 5.
-This avoids redistributing a patch from a source repository that does not state
+`qca-ssdk-shell` has a broken generated-dependency bootstrap. After target
+kernel compilation, the build runs it at `-j1` for at most six passes before
+the parallel world build. Each permitted failed pass must generate dependencies
+and end on the exact missing-`.d` rule; any compiler or linker error aborts
+immediately. Running it after target compilation matters because that phase
+recreates the target build directory. A clean tree succeeded on pass 5. This
+avoids redistributing a patch from a source repository that does not state
 redistribution terms.
 
 TIP's Kconfig currently prints recursive-dependency diagnostics for the
@@ -45,9 +53,11 @@ nonzero `defconfig` exit as a failure.
 ## Host requirements
 
 Use a recent Linux distribution with the normal OpenWrt build dependencies,
-Git, Python 3 with PyYAML, rsync, GNU make, and enough disk space for a complete
-ipq53xx build. The scripts use every available CPU by default; override with
-`JOBS`.
+Git, Python 3 with PyYAML, rsync, GNU make, `flock`, `fdtget` (normally provided
+by a device-tree-compiler package), and enough disk space for a complete ipq53xx
+build. The scripts use every available CPU by default; override with `JOBS`.
+One repository-level lock prevents concurrent builds from corrupting shared
+OpenWrt staging state.
 
 ## Private ART input
 
@@ -70,6 +80,11 @@ completed, preparation may resume that exact pinned upstream state if project
 patching has not started. The script refuses every other existing tree and
 never resets or cleans a checkout.
 
+Preparation records a private state fingerprint covering all nested Git
+worktrees, untracked source additions, the generated `.config`, and the full
+overlay including calibration. The build refuses any later input change. This
+fingerprint is an accidental-change guard, not a signed source attestation.
+
 ```sh
 ./scripts/prepare-tree.sh ./work/wlan-ap /secure/path/nwa50be-art.bin
 JOBS="$(nproc)" ./scripts/build.sh ./work/wlan-ap
@@ -78,8 +93,15 @@ JOBS="$(nproc)" ./scripts/build.sh ./work/wlan-ap
 Outputs are copied to a new UTC-stamped directory under `artifacts/` and
 checksummed. The directory is ignored by Git and the script refuses to
 overwrite it. The build rejects swallowed nested make errors and then validates
-FIT metadata, the DTB flash boundary, UBI geometry, calibration, LuCI, and
-rootfs policy.
+FIT metadata, both the RAM-boot and persistent DTBs, the exact flash boundary,
+UBI geometry, calibration, LuCI, and rootfs policy.
+
+## Package management
+
+This downstream target has no compatible binary package repository. The build
+therefore removes LuCI package management and ships no active remote APK feeds.
+Do not point the device at generic OpenWrt repositories: kernel modules and
+other ABI-sensitive packages will not match the Qualcomm/TIP build.
 
 ## Build identity
 

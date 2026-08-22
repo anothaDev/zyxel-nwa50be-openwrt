@@ -2,6 +2,7 @@ From beafcff845fcdbb46308ee54422661e80300079d Mon Sep 17 00:00:00 2001
 From: Til Kaiser <mail@tk154.de>
 Date: Tue, 10 Mar 2026 11:21:41 +0100
 Subject: [PATCH] compiler, lib, resolv: fix const string pointers
+SPDX-License-Identifier: ISC
 
 Use separate const char * variables for pointers into
 const input strings instead of reusing writable char * locals.
@@ -169,4 +170,3 @@ Signed-off-by: Til Kaiser <mail@tk154.de>
  	struct addrinfo *ai, *aip, hints = {
  		.ai_flags = AI_NUMERICSERV,
  		.ai_socktype = SOCK_DGRAM
-

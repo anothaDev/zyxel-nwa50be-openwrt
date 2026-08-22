@@ -1,0 +1,32 @@
+From: NWA50BE community build <noreply@invalid.example>
+Subject: [PATCH] uhttpd: update past request-smuggling fixes
+SPDX-License-Identifier: GPL-2.0-only
+
+OpenWrt 25.12.5 updates uhttpd past CVE-2026-55612,
+CVE-2026-55613, and CVE-2026-55614. Keep the pinned TIP base while
+backporting the same reviewed uhttpd source revision and mirror hash.
+
+---
+ package/network/services/uhttpd/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/package/network/services/uhttpd/Makefile b/package/network/services/uhttpd/Makefile
+index 6ec45bb5e9..b48a6f3992 100644
+--- a/package/network/services/uhttpd/Makefile
++++ b/package/network/services/uhttpd/Makefile
+@@ -12,9 +12,9 @@ PKG_NAME:=uhttpd
+ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/uhttpd.git
+-PKG_SOURCE_DATE:=2025-10-03
+-PKG_SOURCE_VERSION:=ebb92e6b339b88bbc6b76501b6603c52d4887ba1
+-PKG_MIRROR_HASH:=2d00da72db0ec08132bb169f2bad0b153bd998ea1eee0700b4ec01e65c35127d
++PKG_SOURCE_DATE:=2026-06-16
++PKG_SOURCE_VERSION:=7b1bec45826bd78c8afc993435bdc0f1df2fe399
++PKG_MIRROR_HASH:=ee52821b04cc78f46875e9870b6ed41670606d6b90fb31b31312666c4ed809dd
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+ PKG_LICENSE:=ISC
+ 
+-- 
+2.51.0

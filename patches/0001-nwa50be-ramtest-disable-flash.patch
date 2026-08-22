@@ -1,3 +1,5 @@
+SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-3-Clause)
+
 diff --git a/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts b/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts
 --- a/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts
 +++ b/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts

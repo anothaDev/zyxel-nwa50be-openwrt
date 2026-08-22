@@ -1,5 +1,6 @@
 From: NWA50BE recovery-kit build guard
 Subject: [PATCH] kernel: invalidate stale embedded initramfs payload
+SPDX-License-Identifier: GPL-2.0-only
 
 The vendor-patched tree can retain usr/initramfs_inc_data from the normal
 kernel build when it switches CONFIG_INITRAMFS_SOURCE for the initramfs

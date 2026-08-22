@@ -88,13 +88,31 @@ large_files=$(find "$project" \
 	exit 1
 }
 
+for license in Apache-2.0 BSD-3-Clause GPL-2.0-only GPL-2.0-or-later ISC; do
+	test -s "$project/LICENSES/$license"
+done
+
+for patch in "$project"/patches/*.patch; do
+	test "$(grep -c '^SPDX-License-Identifier:' "$patch")" -eq 1
+	grep -Eq '^SPDX-License-Identifier: (Apache-2\.0|BSD-3-Clause|GPL-2\.0-only|ISC|\(GPL-2\.0-or-later OR BSD-3-Clause\))$' \
+		"$patch"
+done
+
+if grep -Ev '^[[:space:]]*(#|$)' \
+	"$project/overlay/etc/apk/repositories.d/distfeeds.list" >/dev/null; then
+	echo 'Refusing: remote package feeds are enabled in the public overlay.' >&2
+	exit 1
+fi
+
 find "$project/scripts" "$project/overlay" -type f \( \
 	-name '*.sh' -o -path '*/etc/uci-defaults/*' -o -path '*/root/*' \
+	-o -path '*/usr/libexec/*' -o -path '*/usr/share/nwa50be/*' \
 	\) -exec sh -n {} \;
 
 if command -v shellcheck >/dev/null 2>&1; then
 	find "$project/scripts" "$project/overlay" -type f \( \
 		-name '*.sh' -o -path '*/etc/uci-defaults/*' -o -path '*/root/*' \
+		-o -path '*/usr/libexec/*' -o -path '*/usr/share/nwa50be/*' \
 		\) -exec shellcheck -x {} +
 fi
 

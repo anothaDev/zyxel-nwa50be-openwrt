@@ -7,6 +7,15 @@ config defaults
 config zone
 	option name 'lan'
 	list network 'lan'
-	option input 'ACCEPT'
+	option input 'REJECT'
 	option output 'ACCEPT'
 	option forward 'ACCEPT'
+
+config rule 'allow_dhcp_client'
+	option name 'Allow-DHCP-client'
+	option src 'lan'
+	option family 'ipv4'
+	option proto 'udp'
+	option src_port '67'
+	option dest_port '68'
+	option target 'ACCEPT'

@@ -1,3 +1,5 @@
+SPDX-License-Identifier: GPL-2.0-only
+
 diff --git a/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh b/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh
 index 92360263..b7e41fd7 100755
 --- a/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/wireless/mac80211.sh

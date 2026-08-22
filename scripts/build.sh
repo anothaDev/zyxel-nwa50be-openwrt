@@ -21,6 +21,17 @@ stamp=$(date -u '+%Y%m%dT%H%M%SZ')
 stage=${ARTIFACT_DIR:-"$project/artifacts/$stamp"}
 log="$stage/build.log"
 
+command -v flock >/dev/null 2>&1 || {
+	echo 'Missing required command: flock' >&2
+	exit 1
+}
+mkdir -p "$project/work"
+exec 9>"$project/work/.nwa50be-build.lock"
+if ! flock -n 9; then
+	echo 'Refusing: another NWA50BE build is already using this repository.' >&2
+	exit 1
+fi
+
 "$project/scripts/verify-prepared-tree.sh" "$tree"
 
 [ ! -e "$stage" ] || {
@@ -34,8 +45,8 @@ export KBUILD_BUILD_HOST='local'
 
 make -C "$openwrt" -j"$jobs" tools/install V=s
 make -C "$openwrt" -j"$jobs" toolchain/install V=s
-"$project/scripts/bootstrap-qca-ssdk-shell.sh" "$openwrt" "$stage"
 make -C "$openwrt" -j"$jobs" target/compile V=s
+"$project/scripts/bootstrap-qca-ssdk-shell.sh" "$openwrt" "$stage"
 if ! make -C "$openwrt" -j"$jobs" V=s >"$log" 2>&1; then
 	cat "$log"
 	echo 'Refusing: OpenWrt build failed.' >&2

@@ -28,6 +28,13 @@ while IFS= read -r line; do
 			;;
 	esac
 
+	case "${symbol#CONFIG_}" in
+		''|*[!A-Za-z0-9_-]*)
+			echo "Invalid config symbol: $symbol" >&2
+			exit 1
+			;;
+	esac
+
 	sed -i -e "/^${symbol}=/d" -e "/^# ${symbol} is not set$/d" "$config"
 	printf '%s\n' "$line" >>"$config"
 done <"$seed"

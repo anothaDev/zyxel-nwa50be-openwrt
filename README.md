@@ -4,13 +4,16 @@ Experimental, pinned build support for running a persistent TIP/OpenWiFi-based
 OpenWrt image on the Zyxel NWA50BE, including the QCN6432 wide-band radio in
 6 GHz mode.
 
-This is a private-review prototype. It is not upstream OpenWrt, not an official
-Zyxel image, and not ready for unattended installation.
+This is an experimental source-only project. It is not upstream OpenWrt, not an
+official Zyxel image, and not ready for unattended installation.
 
 ## What was verified
 
 One NWA50BE was unlocked through Zyxel's official waiver flow, RAM-booted,
 backed up, installed to NAND, cold-booted, and exercised in a routed deployment.
+Those live observations were collected before the publication-hardening changes
+in this candidate. The current candidate has been rebuilt and structurally
+verified, but has not yet been installed on hardware.
 
 - OpenWrt 25.12.3 with TIP/OpenWiFi `v5.1.0-rc1`
 - Persistent squashfs plus UBIFS overlay on the 60 MiB NAND `rootfs` partition
@@ -65,11 +68,18 @@ evidence.
 - Zyxel's official unlock can void warranty and erase the stock NAND image.
 - A normal return to stock firmware is not guaranteed.
 - UART and a verified TFTP RAM boot are mandatory.
-- The installer image exposes only the NAND rootfs area required by sysupgrade.
+- Only NAND `rootfs` is writable; training, license, and `rootfs_1` remain
+  read-only.
 - SPI NOR remains disabled from Linux.
 - Radios boot disabled.
-- HTTPS LuCI and SSH stay disabled until serial setup establishes credentials.
+- HTTPS LuCI and SSH stay disabled until serial setup establishes credentials
+  and one wired administrator `/32`. Provisioned upgrades preserve that state,
+  the SSH key, and HTTPS/SSH access only for the recorded host.
+- Cleartext HTTP stays disabled, HTTP keep-alive is off, and wireless bridge
+  ports cannot reach the AP management plane.
 - Country code and regulatory limits are never bypassed.
+- Remote package feeds and LuCI package management are disabled because no
+  compatible binary package repository exists for this downstream target.
 
 Read [docs/INSTALL.md](docs/INSTALL.md) completely before touching hardware.
 
@@ -92,6 +102,6 @@ images stay under the ignored `artifacts/` directory. Full details are in
 
 ## Project status
 
-The source and documentation are being reviewed in a private repository first.
-Public visibility and binary releases are separate decisions. The repository
-must pass `./scripts/audit-public-tree.sh` before either decision.
+Public source visibility and binary releases are separate decisions. No binary
+release is currently permitted. The repository must pass
+`./scripts/audit-public-tree.sh` before any publication decision.

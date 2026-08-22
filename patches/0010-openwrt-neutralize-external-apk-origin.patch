@@ -1,5 +1,6 @@
 From: NWA50BE OpenWrt Project <noreply@invalid.example>
 Subject: [PATCH] apk: neutralize absolute external-feed origins
+SPDX-License-Identifier: GPL-2.0-only
 
 src-link feeds outside TOPDIR produce absolute package SOURCE paths. Preserve
 SOURCE for package build logic, but store a stable external/<package> value in

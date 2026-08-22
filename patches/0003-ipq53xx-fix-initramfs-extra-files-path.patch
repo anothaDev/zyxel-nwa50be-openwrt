@@ -1,5 +1,6 @@
 From: NWA50BE recovery-kit build guard
 Subject: [PATCH] ipq53xx: use the central initramfs device list
+SPDX-License-Identifier: GPL-2.0-only
 
 TIP's ipq53xx target is linked from an external feed that also contains an
 empty linux/generic directory.  GENERIC_PLATFORM_DIR therefore points into

@@ -1,0 +1,38 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] qca-ssdk-qca: keep profile files read-only
+SPDX-License-Identifier: BSD-3-Clause
+
+The package prepare hook copies a selected profile init script over the tracked
+generic file in the feed. Select that file while installing the package instead
+so builds do not mutate their source checkout.
+
+--- a/feeds/qca-wifi-7/qca-ssdk-qca/Makefile
++++ b/feeds/qca-wifi-7/qca-ssdk-qca/Makefile
+@@ -155,7 +155,12 @@ endef
+ 
+ define KernelPackage/qca-ssdk-qca-nohnat/install
+ 	$(INSTALL_DIR) $(1)/etc/init.d
+-	$(INSTALL_BIN) ./files/qca-ssdk $(1)/etc/init.d/qca-ssdk
++	if [ -f ./$(FILES_PROFILE_NAME)/qca-ssdk ]; then \
++		$(INSTALL_BIN) ./$(FILES_PROFILE_NAME)/qca-ssdk \
++			$(1)/etc/init.d/qca-ssdk; \
++	else \
++		$(INSTALL_BIN) ./files/qca-ssdk $(1)/etc/init.d/qca-ssdk; \
++	fi
+ endef
+ 
+ define patch_profile
+@@ -163,13 +168,5 @@ define patch_profile
+ endef
+ 
+-define files_profile
+-
+-	if [ -d "./$(FILES_PROFILE_NAME)" ]; then \
+-		$(CP) ./$(FILES_PROFILE_NAME)/* ./files/ ; \
+-	fi
+-endef
+-
+ Hooks/Prepare/Post += patch_profile
+-Hooks/Prepare/Post += files_profile
+ 
+ $(eval $(call KernelPackage,qca-ssdk-qca-nohnat))

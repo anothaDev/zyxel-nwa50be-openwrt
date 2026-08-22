@@ -1,0 +1,9 @@
+table bridge nwa50be_management {
+	chain input {
+		type filter hook input priority -200; policy accept;
+
+		iifname "phy2g-ap*" drop comment "block 2 GHz clients from AP management"
+		iifname "phy5g-ap*" drop comment "block 5 GHz clients from AP management"
+		iifname "phy6g-ap*" drop comment "block 6 GHz clients from AP management"
+	}
+}

@@ -1,5 +1,6 @@
 From: NWA50BE OpenWrt Project <noreply@invalid.example>
 Subject: [PATCH] qca-ssdk-shell: keep nested build serial
+SPDX-License-Identifier: BSD-3-Clause
 
 The upstream source Makefile generates dependency files during failed build
 passes and cannot safely run its nested module builds through a parallel GNU

@@ -1,3 +1,5 @@
+SPDX-License-Identifier: ISC
+
 diff --git a/feeds/qca-wifi-7/mac80211/files-qca/etc/init.d/ath12k_dyn_dbg_enable.sh b/feeds/qca-wifi-7/mac80211/files-qca/etc/init.d/ath12k_dyn_dbg_enable.sh
 --- a/feeds/qca-wifi-7/mac80211/files-qca/etc/init.d/ath12k_dyn_dbg_enable.sh
 +++ b/feeds/qca-wifi-7/mac80211/files-qca/etc/init.d/ath12k_dyn_dbg_enable.sh

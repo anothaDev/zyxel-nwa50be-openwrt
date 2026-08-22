@@ -21,6 +21,21 @@ credentials, overwrite protected flash, bypass regulatory enforcement, or
 brick a device. Do not publish working destructive commands before a mitigation
 exists.
 
+## Management bootstrap
+
+The image intentionally starts with an empty root password only for physical
+UART setup. Dropbear, rpcd, and uHTTPd are disabled, LAN input defaults to
+reject, and radios remain disabled until `/root/nwa50be-setup` sets a password
+and trusted wired management host CIDR. HTTPS management survives upgrades
+without requiring SSH; SSH is enabled only when an `authorized_keys` file
+exists. Remote package feeds are disabled.
+
+This is a downstream OpenWrt 25.12.3/TIP base with the selective backports
+listed in `docs/BUILD.md`; it is not claimed to contain every security change
+from a later upstream OpenWrt release. Before publication, every relevant
+OpenWrt 25.12.5 or subsequent advisory must be backported, removed, disabled,
+or given an explicit exposure-based disposition in the release review.
+
 ## Supported state
 
 Only the pinned source revisions and exact NWA50BE NAND layout documented in

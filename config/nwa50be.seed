@@ -9,6 +9,7 @@ CONFIG_PACKAGE_ip-bridge=y
 CONFIG_PACKAGE_luci-ssl-openssl=y
 CONFIG_PACKAGE_luci-theme-bootstrap=y
 CONFIG_PACKAGE_openssl-util=y
+# CONFIG_PACKAGE_luci-app-package-manager is not set
 # CONFIG_PACKAGE_luci-theme-ucentral is not set
 # CONFIG_PACKAGE_luci-mod-ucentral is not set
 # CONFIG_PACKAGE_mtd is not set

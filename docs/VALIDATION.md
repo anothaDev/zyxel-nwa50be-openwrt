@@ -4,6 +4,33 @@ The following results were collected on one NWA50BE. They demonstrate that the
 build worked on that unit; they are not a reliability guarantee for every board
 revision or RF environment.
 
+The live results below predate the publication-hardening changes. The current
+candidate was rebuilt from its pinned prepared state and passed the automated
+checks described next, but it has not yet been flashed for a new live acceptance
+run.
+
+## Candidate artifact checks
+
+`scripts/build.sh` completed a full local build and
+`scripts/verify-artifacts.sh` accepted all four NWA50BE images. The verifier:
+
+- checks every staged file against `SHA256SUMS`;
+- extracts and structurally validates the DTB from both initramfs and the
+  sysupgrade kernel, then requires those DTBs to be byte-identical;
+- requires SPI disabled, NAND enabled, wide-band mode 2, the exact four NAND
+  partitions, and read-only flags on every partition except `rootfs`;
+- extracts the persistent squashfs and checks calibration against the private
+  build overlay without recording calibration hashes in this repository;
+- requires an empty pre-setup root password, disabled SSH, HTTPS-only setup,
+  wired-source management policy, wireless management blocking, no active
+  package feeds, and no LuCI package manager;
+- requires the packaged SSDK init script to match the NWA50BE profile; and
+- verifies the pinned uHTTPd and OpenSSL package versions in the image manifest.
+
+The prepared-source fingerprint also passed after the build, proving the build
+did not alter its tracked, untracked, configuration, or overlay inputs. These
+checks establish artifact structure and policy, not hardware behavior.
+
 ## Boot and storage
 
 - Normal U-Boot loaded the kernel and DTB from NAND UBI and verified FIT hashes.

@@ -20,3 +20,6 @@ jobs:
 
       - name: Audit publishable files
         run: ./scripts/audit-public-tree.sh
+
+      - name: Run security regression tests
+        run: ./scripts/test-security-regressions.sh

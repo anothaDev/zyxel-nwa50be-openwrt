@@ -7,9 +7,14 @@ respective upstream licenses.
 | Patches | Upstream file license |
 | --- | --- |
 | `0001`, `0005` | GPL-2.0-or-later OR BSD-3-Clause |
-| `0002`, `0003`, `0004`, `0010` | GPL-2.0-only |
-| `0006`, `0007`, `0009` | ISC |
-| `0008` | BSD-3-Clause TIP package wrapper |
+| `0002`, `0003`, `0004`, `0010`, `0011`, `0012`, `0013`, `0016` | GPL-2.0-only |
+| `0006`, `0007` | ISC |
+| `0008`, `0009`, `0015` | BSD-3-Clause TIP package wrapper |
+| `0014` | Apache-2.0 LuCI collection |
+
+Each patch carries an SPDX identifier. Applicable license texts are included
+under `LICENSES/`; the root `LICENSE` covers only this project's original
+scripts and documentation.
 
 The pinned TIP/OpenWiFi repository is published under BSD-3-Clause and publicly
 contains the Qualcomm firmware consumed by the NWA50BE profile. However, the

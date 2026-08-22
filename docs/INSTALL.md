@@ -18,11 +18,13 @@ custom firmware is outside normal warranty and support coverage:
 
 - https://community.zyxel.com/en/discussion/32423/zyxel-networks-access-points-now-support-openwrt-based-customized-software
 - https://warranty-waiver.zyxel.com/
+- https://warranty-waiver.zyxel.com/docs/Zyxel_OpenWRT_SOP_v1.1-202600303.pdf
 
 ## UART
 
-Use a 3.3 V TTL adapter. Cross adapter RX to AP TX and adapter TX to AP RX.
-Connect ground. Never connect adapter VCC and never use RS-232 voltage levels.
+Use a 3.3 V TTL adapter. Connect adapter RX to AP pin 3 (TX), adapter TX to AP
+pin 2 (RX), and ground to AP pin 4. Never connect adapter VCC and never use
+RS-232 voltage levels.
 
 The standard four-pin orientation, viewed using the board's pin-1 triangle, is:
 
@@ -30,7 +32,7 @@ The standard four-pin orientation, viewed using the board's pin-1 triangle, is:
 triangle
    v
  [1] [2] [3] [4]
-  NC  TX  RX  GND
+  NC  RX  TX  GND
 ```
 
 Verify the board revision and pinout independently before applying power.
@@ -109,6 +111,37 @@ run:
 /root/nwa50be-setup
 ```
 
-The helper sets a root password and ISO country code, then enables HTTPS LuCI.
-It does not create SSIDs or enable radios. Configure those deliberately in LuCI
-and retain the driver's regulatory enforcement.
+The helper replaces the intentionally empty serial-setup password, sets an ISO
+country code, then enables HTTPS LuCI.
+It requires the wired administrator's IPv4 address as a `/32`. Wireless bridge
+ports are blocked from the AP management plane independently of this source
+allowlist. The setup state, management `/32`, password, and SSH key when present
+are preserved across later sysupgrades. HTTPS remains reachable only from that
+host; SSH does too when an authorized key exists. Cleartext HTTP remains
+disabled. Use a static or DHCP-reserved administrator address; changing it
+requires another serial setup run.
+The helper does not create SSIDs or enable radios. Configure those deliberately
+in LuCI and retain the driver's regulatory enforcement. Use 6 GHz LPI mode only
+where permitted and only in the indoor deployment conditions required locally.
+
+## Later remote upgrades
+
+An already provisioned AP may retain remote management across a later
+sysupgrade when all of the following are preserved: the setup-complete marker,
+one wired administrator `/32`, and a nonempty root password. The first-boot
+policy validates that state before enabling rpcd and uhttpd. Dropbear is enabled
+only when at least one SSH authorized key is also preserved. The policy rebuilds
+the input firewall with only ports 22 and 443 allowed from the recorded `/32`;
+cleartext HTTP remains absent.
+
+The first upgrade from an older community image requires staging
+`/etc/nwa50be-setup-complete` and `/etc/nwa50be-management-cidr`, then confirming
+that `sysupgrade -l` lists those files and, when used,
+`/etc/dropbear/authorized_keys`. The key is optional when only HTTPS management
+is required.
+Use `sysupgrade` with configuration preservation; `sysupgrade -n` deliberately
+removes this state and will return the AP to serial-only setup.
+
+Remote upgrade prevents an intentional management lockout, but it cannot
+recover a failed boot. Without UART, a NAND or kernel failure remains
+unrecoverable over the network.

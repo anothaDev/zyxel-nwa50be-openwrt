@@ -1,5 +1,6 @@
 From: NWA50BE OpenWrt Project <noreply@invalid.example>
 Subject: [PATCH] qca-nss-phy: ignore empty package probe
+SPDX-License-Identifier: BSD-3-Clause
 
 OpenWrt's rootfs assembly sources the init helper without an argument. Do not
 fall through to its undefined fatal helper for that packaging probe. Runtime

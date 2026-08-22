@@ -1,0 +1,57 @@
+#!/bin/sh
+
+set -eu
+
+root=${1-}
+case "$root" in
+	''|/*) ;;
+	*) exit 2 ;;
+esac
+
+valid_ipv4_cidr() {
+	value="$1"
+	address=${value%/*}
+	prefix=${value##*/}
+
+	[ "$address" != "$value" ] || return 1
+	case "$address" in
+		''|.*|*.|*..*|*[!0-9.]*) return 1 ;;
+	esac
+	case "$prefix" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "$prefix" -eq 32 ] 2>/dev/null || return 1
+
+	old_ifs=$IFS
+	IFS=.
+	set -- $address
+	IFS=$old_ifs
+	[ "$#" -eq 4 ] || return 1
+	for octet in "$@"; do
+		case "$octet" in
+			''|*[!0-9]*) return 1 ;;
+		esac
+		[ "$octet" -le 255 ] 2>/dev/null || return 1
+	done
+}
+
+marker="$root/etc/nwa50be-setup-complete"
+cidr_file="$root/etc/nwa50be-management-cidr"
+shadow="$root/etc/shadow"
+
+[ -f "$marker" ]
+[ -f "$cidr_file" ]
+[ "$(wc -l <"$cidr_file")" -eq 1 ]
+IFS= read -r management_cidr <"$cidr_file"
+valid_ipv4_cidr "$management_cidr"
+[ -f "$shadow" ]
+
+root_entries=$(awk -F: '$1 == "root" { count++ } END { print count + 0 }' "$shadow")
+[ "$root_entries" -eq 1 ]
+
+root_password=$(awk -F: '$1 == "root" { print $2; exit }' "$shadow")
+case "$root_password" in
+	''|'!'|'*') exit 1 ;;
+esac
+
+printf '%s\n' "$management_cidr"

@@ -2,24 +2,42 @@
 
 set -u
 
+root=${NWA50BE_ROOT:-}
+case "$root" in
+	''|/*) ;;
+	*) exit 2 ;;
+esac
+
+management_cidr=
+management_state="$root/usr/libexec/nwa50be-management-state"
+if [ -x "$management_state" ]; then
+	management_cidr="$($management_state "$root" 2>/dev/null || true)"
+fi
+
 disable_service() {
 	service="$1"
-	if [ -x "/etc/init.d/$service" ]; then
-		"/etc/init.d/$service" disable >/dev/null 2>&1 || true
-		"/etc/init.d/$service" stop >/dev/null 2>&1 || true
+	service_path="$root/etc/init.d/$service"
+	if [ -x "$service_path" ]; then
+		"$service_path" disable >/dev/null 2>&1 || true
+		"$service_path" stop >/dev/null 2>&1 || true
 	fi
 }
 
 enable_service() {
 	service="$1"
-	if [ -x "/etc/init.d/$service" ]; then
-		"/etc/init.d/$service" enable >/dev/null 2>&1 || true
+	service_path="$root/etc/init.d/$service"
+	if [ -x "$service_path" ]; then
+		"$service_path" enable >/dev/null 2>&1 || true
 	fi
 }
 
-soc_serial="$(cat /sys/devices/soc0/serial_number 2>/dev/null || true)"
-serial_hash="$(printf '%s' "$soc_serial" | sha256sum 2>/dev/null | cut -c1-8 || true)"
-mac_prefix="$(printf '%s\n' "$serial_hash" | sed -n 's/^\(..\)\(..\)\(..\)\(..\)$/02:\1:\2:\3:\4/p')"
+soc_serial="$(cat "$root/sys/devices/soc0/serial_number" 2>/dev/null || true)"
+serial_hash=
+mac_prefix=
+if [ -n "$soc_serial" ]; then
+	serial_hash="$(printf '%s' "$soc_serial" | sha256sum 2>/dev/null | cut -c1-8 || true)"
+	mac_prefix="$(printf '%s\n' "$serial_hash" | sed -n 's/^\(..\)\(..\)\(..\)\(..\)$/02:\1:\2:\3:\4/p')"
+fi
 
 for service in \
 	atfpolicy bridger cloud_discover cpm dataplane dhcpinject dhcprelay \
@@ -30,63 +48,110 @@ for service in \
 	disable_service "$service"
 done
 
-for service in dnsmasq odhcpd dropbear rpcd uhttpd; do
+for service in dnsmasq odhcpd; do
 	disable_service "$service"
 done
+if [ -z "$management_cidr" ]; then
+	for service in dropbear rpcd uhttpd; do
+		disable_service "$service"
+	done
+fi
 
 for service in firewall sysntpd; do
 	enable_service "$service"
 done
 
-for section in lan lan_bridge eth0_device; do
-	uci -q delete "network.$section"
+if [ -z "$management_cidr" ]; then
+	for section in lan lan_bridge eth0_device; do
+		uci -q delete "network.$section"
+	done
+
+	uci -q set network.eth0_device='device'
+	uci -q set network.eth0_device.name='eth0'
+	[ -n "$mac_prefix" ] && uci -q set "network.eth0_device.macaddr=${mac_prefix}:01"
+
+	uci -q set network.lan_bridge='device'
+	uci -q set network.lan_bridge.name='br-lan'
+	uci -q set network.lan_bridge.type='bridge'
+	uci -q set network.lan_bridge.stp='0'
+	uci -q set network.lan_bridge.igmp_snooping='1'
+	uci -q add_list network.lan_bridge.ports='eth0'
+	[ -n "$mac_prefix" ] && uci -q set "network.lan_bridge.macaddr=${mac_prefix}:01"
+
+	uci -q set network.lan='interface'
+	uci -q set network.lan.device='br-lan'
+	uci -q set network.lan.proto='dhcp'
+	uci -q set network.lan.delegate='0'
+	uci -q commit network
+fi
+
+for zone in $(uci -q show firewall | \
+	sed -n 's/^firewall\.\([^.=]*\)=zone$/\1/p'); do
+	uci -q set "firewall.$zone.input=REJECT"
 done
-
-uci -q set network.eth0_device='device'
-uci -q set network.eth0_device.name='eth0'
-[ -n "$mac_prefix" ] && uci -q set "network.eth0_device.macaddr=${mac_prefix}:01"
-
-uci -q set network.lan_bridge='device'
-uci -q set network.lan_bridge.name='br-lan'
-uci -q set network.lan_bridge.type='bridge'
-uci -q set network.lan_bridge.stp='0'
-uci -q set network.lan_bridge.igmp_snooping='1'
-uci -q add_list network.lan_bridge.ports='eth0'
-[ -n "$mac_prefix" ] && uci -q set "network.lan_bridge.macaddr=${mac_prefix}:01"
-
-uci -q set network.lan='interface'
-uci -q set network.lan.device='br-lan'
-uci -q set network.lan.proto='dhcp'
-uci -q set network.lan.delegate='0'
-uci -q commit network
-
-while uci -q get firewall.@zone[0] >/dev/null 2>&1; do
-	uci -q delete firewall.@zone[0]
-done
+if [ -z "$management_cidr" ]; then
+	while uci -q get firewall.@zone[0] >/dev/null 2>&1; do
+		uci -q delete firewall.@zone[0]
+	done
+fi
+uci -q set firewall.@defaults[0].input='REJECT'
 uci -q delete firewall.lan
 uci -q set firewall.lan='zone'
 uci -q set firewall.lan.name='lan'
 uci -q add_list firewall.lan.network='lan'
-uci -q set firewall.lan.input='ACCEPT'
+uci -q set firewall.lan.input='REJECT'
 uci -q set firewall.lan.output='ACCEPT'
 uci -q set firewall.lan.forward='ACCEPT'
+
+for section in nwa50be_management nwa50be_management_ping; do
+	uci -q delete "firewall.$section"
+done
+if [ -n "$management_cidr" ]; then
+	uci -q set firewall.nwa50be_management='rule'
+	uci -q set firewall.nwa50be_management.name='Allow-trusted-management'
+	uci -q set firewall.nwa50be_management.src='lan'
+	uci -q set firewall.nwa50be_management.family='ipv4'
+	uci -q set firewall.nwa50be_management.proto='tcp'
+	uci -q add_list firewall.nwa50be_management.dest_port='22'
+	uci -q add_list firewall.nwa50be_management.dest_port='443'
+	uci -q set "firewall.nwa50be_management.src_ip=$management_cidr"
+	uci -q set firewall.nwa50be_management.target='ACCEPT'
+
+	uci -q set firewall.nwa50be_management_ping='rule'
+	uci -q set firewall.nwa50be_management_ping.name='Allow-trusted-management-ping'
+	uci -q set firewall.nwa50be_management_ping.src='lan'
+	uci -q set firewall.nwa50be_management_ping.family='ipv4'
+	uci -q set firewall.nwa50be_management_ping.proto='icmp'
+	uci -q set firewall.nwa50be_management_ping.icmp_type='echo-request'
+	uci -q set "firewall.nwa50be_management_ping.src_ip=$management_cidr"
+	uci -q set firewall.nwa50be_management_ping.target='ACCEPT'
+fi
+
+uci -q delete firewall.allow_dhcp_client
+uci -q set firewall.allow_dhcp_client='rule'
+uci -q set firewall.allow_dhcp_client.name='Allow-DHCP-client'
+uci -q set firewall.allow_dhcp_client.src='lan'
+uci -q set firewall.allow_dhcp_client.family='ipv4'
+uci -q set firewall.allow_dhcp_client.proto='udp'
+uci -q set firewall.allow_dhcp_client.src_port='67'
+uci -q set firewall.allow_dhcp_client.dest_port='68'
+uci -q set firewall.allow_dhcp_client.target='ACCEPT'
 uci -q commit firewall
 
-uci -q set system.@system[0].hostname='nwa50be-openwrt'
-uci -q set system.@system[0].timezone='UTC0'
-uci -q set system.@system[0].zonename='UTC'
-uci -q commit system
+if [ -z "$management_cidr" ]; then
+	uci -q set system.@system[0].hostname='nwa50be-openwrt'
+	uci -q set system.@system[0].timezone='UTC0'
+	uci -q set system.@system[0].zonename='UTC'
+	uci -q commit system
 
-uci -q set luci.main.mediaurlbase='/luci-static/bootstrap'
-uci -q commit luci
+	uci -q set luci.main.mediaurlbase='/luci-static/bootstrap'
+	uci -q commit luci
+fi
 
 uci -q delete uhttpd.main
 uci -q set uhttpd.main='uhttpd'
-uci -q add_list uhttpd.main.listen_http='0.0.0.0:80'
-uci -q add_list uhttpd.main.listen_http='[::]:80'
 uci -q add_list uhttpd.main.listen_https='0.0.0.0:443'
 uci -q add_list uhttpd.main.listen_https='[::]:443'
-uci -q set uhttpd.main.redirect_https='1'
 uci -q set uhttpd.main.home='/www'
 uci -q set uhttpd.main.rfc1918_filter='1'
 uci -q set uhttpd.main.max_requests='3'
@@ -97,28 +162,50 @@ uci -q set uhttpd.main.cgi_prefix='/cgi-bin'
 uci -q add_list uhttpd.main.lua_prefix='/cgi-bin/luci=/usr/lib/lua/luci/sgi/uhttpd.lua'
 uci -q set uhttpd.main.script_timeout='60'
 uci -q set uhttpd.main.network_timeout='30'
-uci -q set uhttpd.main.http_keepalive='20'
+uci -q set uhttpd.main.http_keepalive='0'
 uci -q set uhttpd.main.tcp_keepalive='1'
 uci -q commit uhttpd
 
-if [ ! -s /etc/config/wireless ] && command -v wifi >/dev/null 2>&1; then
-	wifi config >/dev/null 2>&1 || true
+if [ -z "$management_cidr" ]; then
+	if [ ! -s "$root/etc/config/wireless" ] && command -v wifi >/dev/null 2>&1; then
+		wifi config >/dev/null 2>&1 || true
+	fi
+
+	for iface in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-iface$/\1/p"); do
+		uci -q delete "wireless.$iface"
+	done
+
+	for radio in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
+		uci -q delete "wireless.$radio.country"
+		uci -q set "wireless.$radio.disabled=1"
+		case "$radio" in
+			radio0) [ -n "$mac_prefix" ] && uci -q set "wireless.$radio.macaddr_base=${mac_prefix}:10" ;;
+			radio1) [ -n "$mac_prefix" ] && uci -q set "wireless.$radio.macaddr_base=${mac_prefix}:20" ;;
+		esac
+	done
+
+	uci -q commit wireless
+	wifi down >/dev/null 2>&1 || true
+else
+	uci -q set dropbear.main.Interface='lan'
+	uci -q set dropbear.main.PasswordAuth='off'
+	uci -q set dropbear.main.RootPasswordAuth='off'
+	uci -q set dropbear.main.RootLogin='1'
+	uci -q set dropbear.main.LocalPortForward='off'
+	uci -q set dropbear.main.RemotePortForward='off'
+	if [ -s "$root/etc/dropbear/authorized_keys" ]; then
+		uci -q set dropbear.main.enable='1'
+		enable_service dropbear
+	else
+		uci -q set dropbear.main.enable='0'
+		disable_service dropbear
+	fi
+	uci -q commit dropbear
+	for service in rpcd uhttpd; do
+		enable_service "$service"
+	done
+	logger -t nwa50be \
+		"Preserved wired management access for $management_cidr"
 fi
-
-for iface in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-iface$/\1/p"); do
-	uci -q delete "wireless.$iface"
-done
-
-for radio in $(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-device$/\1/p"); do
-	uci -q delete "wireless.$radio.country"
-	uci -q set "wireless.$radio.disabled=1"
-	case "$radio" in
-		radio0) [ -n "$mac_prefix" ] && uci -q set "wireless.$radio.macaddr_base=${mac_prefix}:10" ;;
-		radio1) [ -n "$mac_prefix" ] && uci -q set "wireless.$radio.macaddr_base=${mac_prefix}:20" ;;
-	esac
-done
-
-uci -q commit wireless
-wifi down >/dev/null 2>&1 || true
 
 exit 0

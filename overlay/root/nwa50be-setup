@@ -2,10 +2,41 @@
 
 set -eu
 
-if [ ! -t 0 ]; then
-	echo 'Run this helper interactively from the serial console.' >&2
-	exit 1
-fi
+console="$(tty 2>/dev/null || true)"
+case "$console" in
+	/dev/console|/dev/ttyMSM*|/dev/ttyS*) ;;
+	*)
+		echo 'Run this helper interactively from the serial console.' >&2
+		exit 1
+		;;
+esac
+
+valid_ipv4_cidr() {
+	value="$1"
+	address=${value%/*}
+	prefix=${value##*/}
+
+	[ "$address" != "$value" ] || return 1
+	case "$address" in
+		''|.*|*.|*..*|*[!0-9.]*) return 1 ;;
+	esac
+	case "$prefix" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "$prefix" -eq 32 ] 2>/dev/null || return 1
+
+	old_ifs=$IFS
+	IFS=.
+	set -- $address
+	IFS=$old_ifs
+	[ "$#" -eq 4 ] || return 1
+	for octet in "$@"; do
+		case "$octet" in
+			''|*[!0-9]*) return 1 ;;
+		esac
+		[ "$octet" -le 255 ] 2>/dev/null || return 1
+	done
+}
 
 printf 'ISO country code for this installation (example: IT): '
 IFS= read -r country
@@ -18,6 +49,15 @@ case "$country" in
 		exit 1
 		;;
 esac
+
+while :; do
+	printf 'Wired administrator IPv4 host CIDR (must end in /32): '
+	IFS= read -r management_cidr
+	if valid_ipv4_cidr "$management_cidr"; then
+		break
+	fi
+	echo 'Enter an IPv4 network in CIDR notation, for example 192.0.2.10/32.' >&2
+done
 
 echo 'Set the root password used by LuCI:'
 passwd
@@ -41,6 +81,31 @@ case "$isolate" in
 		;;
 esac
 
+for section in nwa50be_management nwa50be_management_ping; do
+	uci -q delete "firewall.$section"
+done
+
+uci -q set firewall.nwa50be_management='rule'
+uci -q set firewall.nwa50be_management.name='Allow-trusted-management'
+uci -q set firewall.nwa50be_management.src='lan'
+uci -q set firewall.nwa50be_management.family='ipv4'
+uci -q set firewall.nwa50be_management.proto='tcp'
+uci -q add_list firewall.nwa50be_management.dest_port='22'
+uci -q add_list firewall.nwa50be_management.dest_port='443'
+uci -q set "firewall.nwa50be_management.src_ip=$management_cidr"
+uci -q set firewall.nwa50be_management.target='ACCEPT'
+
+uci -q set firewall.nwa50be_management_ping='rule'
+uci -q set firewall.nwa50be_management_ping.name='Allow-trusted-management-ping'
+uci -q set firewall.nwa50be_management_ping.src='lan'
+uci -q set firewall.nwa50be_management_ping.family='ipv4'
+uci -q set firewall.nwa50be_management_ping.proto='icmp'
+uci -q set firewall.nwa50be_management_ping.icmp_type='echo-request'
+uci -q set "firewall.nwa50be_management_ping.src_ip=$management_cidr"
+uci -q set firewall.nwa50be_management_ping.target='ACCEPT'
+uci -q commit firewall
+/etc/init.d/firewall restart
+
 for service in rpcd uhttpd; do
 	"/etc/init.d/$service" enable
 	"/etc/init.d/$service" restart
@@ -55,7 +120,10 @@ else
 	echo 'SSH remains disabled because no authorized_keys file is installed.'
 fi
 
+umask 077
+printf '%s\n' "$management_cidr" >/etc/nwa50be-management-cidr
 touch /etc/nwa50be-setup-complete
+chmod 0600 /etc/nwa50be-management-cidr /etc/nwa50be-setup-complete
 
 address="$(ubus call network.interface.lan status 2>/dev/null | \
 	jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null || true)"

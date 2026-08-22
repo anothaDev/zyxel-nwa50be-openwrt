@@ -83,14 +83,19 @@ for patch in \
 	0005-nwa50be-enable-nand-keep-spi-locked.patch \
 	0006-ath12k-preserve-local-module-policy.patch \
 	0008-qca-ssdk-shell-keep-nested-build-serial.patch \
-	0009-qca-nss-phy-ignore-empty-package-probe.patch; do
+	0009-qca-nss-phy-ignore-empty-package-probe.patch \
+	0015-qca-ssdk-qca-keep-profile-files-read-only.patch; do
 	git -C "$tree" apply --check "$project/patches/$patch"
 	git -C "$tree" apply "$project/patches/$patch"
 done
 
 for patch in \
 	0002-openwrt-refresh-initramfs-payload.patch \
-	0010-openwrt-neutralize-external-apk-origin.patch; do
+	0010-openwrt-neutralize-external-apk-origin.patch \
+	0011-openwrt-update-uhttpd-security.patch \
+	0012-openwrt-update-openssl-3.5.7.patch \
+	0013-openwrt-remove-default-root-password.patch \
+	0016-openssl-disable-unused-quic.patch; do
 	git -C "$tree/openwrt" apply --check "$project/patches/$patch"
 	git -C "$tree/openwrt" apply "$project/patches/$patch"
 done
@@ -102,10 +107,14 @@ cp "$project/patches/0007-ucode-fix-const-string-pointers.patch" \
 (
 	cd "$tree/openwrt"
 	./scripts/gen_config.py zyxel_nwa50be
+	git -C feeds/luci apply --check \
+		"$project/patches/0014-luci-remove-package-manager-dependency.patch"
+	git -C feeds/luci apply \
+		"$project/patches/0014-luci-remove-package-manager-dependency.patch"
 	./scripts/feeds install \
 		luci-ssl-openssl luci-theme-bootstrap luci-mod-admin-full \
 		luci-mod-network luci-mod-status luci-mod-system \
-		luci-app-firewall luci-app-package-manager
+		luci-app-firewall
 )
 
 "$project/scripts/apply-config-seed.sh" \
@@ -115,7 +124,12 @@ mkdir -p "$tree/openwrt/files"
 rsync -a --delete "$project/overlay/" "$tree/openwrt/files/"
 "$project/scripts/inject-calibration.sh" "$art" "$tree/openwrt/files"
 
-printf '%s\n' "$tip_commit" >"$tree/.nwa50be-community-prepared"
+state_file="$tree/.nwa50be-community-prepared"
+state_tmp=$(mktemp)
+trap 'rm -f "$state_tmp"' EXIT HUP INT TERM
+"$project/scripts/fingerprint-prepared-tree.sh" "$tree" >"$state_tmp"
+mv "$state_tmp" "$state_file"
+trap - EXIT HUP INT TERM
 
 "$project/scripts/verify-prepared-tree.sh" "$tree"
 

@@ -1,0 +1,26 @@
+From: NWA50BE community build <noreply@invalid.example>
+Subject: [PATCH] openssl: disable unused QUIC support
+SPDX-License-Identifier: GPL-2.0-only
+
+This access point does not ship a QUIC client or server.  Disable the OpenSSL
+QUIC implementation to remove unused attack surface, including the listener
+code affected by CVE-2026-14456.
+
+---
+ package/libs/openssl/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/package/libs/openssl/Makefile b/package/libs/openssl/Makefile
+--- a/package/libs/openssl/Makefile
++++ b/package/libs/openssl/Makefile
+@@ -215,7 +215,7 @@ and https://openwrt.org/docs/techref/ha
+ The engine_id is "padlock"
+ endef
+ 
+-OPENSSL_OPTIONS:= shared no-tests
++OPENSSL_OPTIONS:= shared no-tests no-quic
+ 
+ ifndef CONFIG_OPENSSL_WITH_BLAKE2
+   OPENSSL_OPTIONS += no-blake2
+-- 
+2.51.0
