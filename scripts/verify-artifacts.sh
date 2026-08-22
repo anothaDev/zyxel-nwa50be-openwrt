@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Fixed-string probes below intentionally match shell source without expansion.
+# shellcheck disable=SC2016
+
 set -eu
 
 usage() {

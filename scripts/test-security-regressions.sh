@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Test fixtures below intentionally preserve shell expressions for later execution.
+# shellcheck disable=SC2016
+
 set -eu
 
 project=$(

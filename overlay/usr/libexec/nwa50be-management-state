@@ -24,6 +24,8 @@ valid_ipv4_cidr() {
 
 	old_ifs=$IFS
 	IFS=.
+	# The unquoted expansion intentionally splits a validated dotted IPv4 address.
+	# shellcheck disable=SC2086
 	set -- $address
 	IFS=$old_ifs
 	[ "$#" -eq 4 ] || return 1
