@@ -110,6 +110,9 @@ grep -Fq 'management_state="$root/usr/libexec/nwa50be-management-state"' \
 grep -Fq 'firewall.$zone.input=REJECT' \
 	"$overlay/etc/uci-defaults/zzzz-nwa50be-community"
 test -x "$overlay/usr/libexec/nwa50be-management-state"
+test -x "$overlay/usr/sbin/nwa50be-sysupgrade"
+grep -Fq '"$sysupgrade_bin" -T -f "$backup" "$image"' \
+	"$overlay/usr/sbin/nwa50be-sysupgrade"
 grep -Fq '[ "$prefix" -eq 32 ]' "$overlay/root/nwa50be-setup"
 grep -Fq '[ "$prefix" -eq 32 ]' \
 	"$overlay/usr/libexec/nwa50be-management-state"
@@ -134,6 +137,8 @@ if grep -Ev '^[[:space:]]*(#|$)' \
 fi
 test -f "$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fq 'iifname "phy6g-ap*" drop' \
+	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fxq 'ath12k frame_mode=1 cold_boot_cal=0 mlo_capable=0' \
 	"$overlay/etc/modules.d/ath12k"

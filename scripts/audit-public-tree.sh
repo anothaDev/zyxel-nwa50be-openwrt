@@ -106,13 +106,15 @@ fi
 
 find "$project/scripts" "$project/overlay" -type f \( \
 	-name '*.sh' -o -path '*/etc/uci-defaults/*' -o -path '*/root/*' \
-	-o -path '*/usr/libexec/*' -o -path '*/usr/share/nwa50be/*' \
+	-o -path '*/usr/libexec/*' -o -path '*/usr/sbin/*' \
+	-o -path '*/usr/share/nwa50be/*' \
 	\) -exec sh -n {} \;
 
 if command -v shellcheck >/dev/null 2>&1; then
 	find "$project/scripts" "$project/overlay" -type f \( \
 		-name '*.sh' -o -path '*/etc/uci-defaults/*' -o -path '*/root/*' \
-		-o -path '*/usr/libexec/*' -o -path '*/usr/share/nwa50be/*' \
+		-o -path '*/usr/libexec/*' -o -path '*/usr/sbin/*' \
+		-o -path '*/usr/share/nwa50be/*' \
 		\) -exec shellcheck -x {} +
 fi
 

@@ -4,10 +4,13 @@ The following results were collected on one NWA50BE. They demonstrate that the
 build worked on that unit; they are not a reliability guarantee for every board
 revision or RF environment.
 
-The live results below predate the publication-hardening changes. The current
-candidate was rebuilt from its pinned prepared state and passed the automated
-checks described next, but it has not yet been flashed for a new live acceptance
-run.
+The publication-hardening candidate was installed on the tested AP. A plain
+`sysupgrade <image>` booted the new image but did not preserve configuration,
+because this OpenWrt snapshot requires the backup to be supplied explicitly
+with `-f`. The verified pre-upgrade backup was restored over UART, followed by
+a normal reboot and a new live acceptance run. The source now provides a
+fail-closed `nwa50be-sysupgrade` wrapper; that wrapper itself has automated
+coverage but has not been used for another live flash.
 
 ## Candidate artifact checks
 
@@ -24,6 +27,8 @@ run.
 - requires an empty pre-setup root password, disabled SSH, HTTPS-only setup,
   wired-source management policy, wireless management blocking, no active
   package feeds, and no LuCI package manager;
+- requires the NWA50BE upgrade wrapper to create, inspect, test, and explicitly
+  pass a configuration backup with `sysupgrade -f`;
 - requires the packaged SSDK init script to match the NWA50BE profile; and
 - verifies the pinned uHTTPd and OpenSSL package versions in the image manifest.
 
@@ -48,6 +53,10 @@ checks establish artifact structure and policy, not hardware behavior.
   latency.
 - AP-originated public-IP and DNS tests completed successfully.
 - HTTPS LuCI returned the authenticated login boundary after reboot.
+- A new 60-packet routed management sample completed with 0% loss and 0.266 ms
+  average latency after the hardened-image recovery reboot.
+- HTTPS returned HTTP 200, cleartext port 80 refused connections, SSH key login
+  succeeded, and outbound HTTPS plus DNS succeeded.
 
 ## Wireless
 
@@ -56,6 +65,8 @@ checks establish artifact structure and policy, not hardware behavior.
 - Close-range client PHY rates exceeded 2 Gbit/s.
 - Measured internet download exceeded 1 Gbit/s in close-range testing.
 - Multiple clients and a legacy printer re-associated after cold boot.
+- Seven clients re-associated after the hardened-image recovery reboot: one on
+  normal 2.4 GHz, two on compatibility, and four on the 160 MHz high-band BSS.
 - Cross-BSS isolation blocked normal-to-compatibility traffic while the printer
   remained reachable from a client on the same compatibility BSS.
 

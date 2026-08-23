@@ -22,8 +22,8 @@ custom firmware is outside normal warranty and support coverage:
 
 ## UART
 
-Use a 3.3 V TTL adapter. Connect adapter RX to AP pin 3 (TX), adapter TX to AP
-pin 2 (RX), and ground to AP pin 4. Never connect adapter VCC and never use
+Use a 3.3 V TTL adapter. Connect adapter RX to AP pin 2 (TX), adapter TX to AP
+pin 3 (RX), and ground to AP pin 4. Never connect adapter VCC and never use
 RS-232 voltage levels.
 
 The standard four-pin orientation, viewed using the board's pin-1 triangle, is:
@@ -32,7 +32,7 @@ The standard four-pin orientation, viewed using the board's pin-1 triangle, is:
 triangle
    v
  [1] [2] [3] [4]
-  NC  RX  TX  GND
+  NC  TX  RX  GND
 ```
 
 Verify the board revision and pinout independently before applying power.
@@ -139,8 +139,17 @@ The first upgrade from an older community image requires staging
 that `sysupgrade -l` lists those files and, when used,
 `/etc/dropbear/authorized_keys`. The key is optional when only HTTPS management
 is required.
-Use `sysupgrade` with configuration preservation; `sysupgrade -n` deliberately
-removes this state and will return the AP to serial-only setup.
+This OpenWrt snapshot treats a plain `sysupgrade <image>` command as a
+no-preservation upgrade. Use the device wrapper, which creates and validates a
+backup before passing it explicitly with `sysupgrade -f`:
+
+```sh
+nwa50be-sysupgrade /tmp/openwrt-ipq53xx-zyxel_nwa50be-squashfs-sysupgrade.tar
+```
+
+Do not invoke plain `sysupgrade <image>` for a provisioned AP. `sysupgrade -n`
+also deliberately removes the saved state and returns the AP to serial-only
+setup.
 
 Remote upgrade prevents an intentional management lockout, but it cannot
 recover a failed boot. Without UART, a NAND or kernel failure remains

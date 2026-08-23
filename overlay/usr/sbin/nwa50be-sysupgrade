@@ -1,0 +1,105 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+	echo "usage: $0 <sysupgrade-image>" >&2
+	exit 2
+}
+
+[ "$#" -eq 1 ] || usage
+
+root=${NWA50BE_ROOT:-}
+case "$root" in
+	''|/*) ;;
+	*) exit 2 ;;
+esac
+
+image=$1
+state_helper=${NWA50BE_MANAGEMENT_STATE:-$root/usr/libexec/nwa50be-management-state}
+sysupgrade_bin=${NWA50BE_SYSUPGRADE_BIN:-/sbin/sysupgrade}
+umask 077
+backup=${NWA50BE_BACKUP_PATH:-$(mktemp /tmp/nwa50be-sysupgrade.XXXXXX.tar.gz)}
+backup_root=$(mktemp -d /tmp/nwa50be-sysupgrade.XXXXXX)
+trap 'rm -rf "$backup_root"; rm -f "$backup"' EXIT HUP INT TERM
+
+[ -s "$image" ] || {
+	echo "Refusing: sysupgrade image is missing or empty: $image" >&2
+	exit 1
+}
+[ -x "$state_helper" ]
+[ -x "$sysupgrade_bin" ]
+
+"$state_helper" "$root" >/dev/null || {
+	echo 'Refusing: provisioned management state is incomplete.' >&2
+	exit 1
+}
+
+"$sysupgrade_bin" -b "$backup"
+[ -s "$backup" ] || {
+	echo 'Refusing: sysupgrade produced an empty configuration backup.' >&2
+	exit 1
+}
+
+for path in \
+	etc/config/dropbear \
+	etc/config/firewall \
+	etc/config/network \
+	etc/config/uhttpd \
+	etc/config/wireless \
+	etc/nwa50be-setup-complete \
+	etc/nwa50be-management-cidr \
+	etc/shadow; do
+	tar -tzf "$backup" | grep -Fxq "$path" || {
+		echo "Refusing: configuration backup is missing $path" >&2
+		exit 1
+	}
+done
+if [ -s "$root/etc/dropbear/authorized_keys" ]; then
+	tar -tzf "$backup" | grep -Fxq 'etc/dropbear/authorized_keys' || {
+		echo 'Refusing: configuration backup is missing the SSH authorized key.' >&2
+		exit 1
+	}
+fi
+
+tar -xzf "$backup" -C "$backup_root" \
+	etc/config/dropbear \
+	etc/config/firewall \
+	etc/config/network \
+	etc/config/uhttpd \
+	etc/config/wireless \
+	etc/nwa50be-setup-complete \
+	etc/nwa50be-management-cidr \
+	etc/shadow
+if [ -s "$root/etc/dropbear/authorized_keys" ]; then
+	tar -xzf "$backup" -C "$backup_root" etc/dropbear/authorized_keys
+fi
+
+"$state_helper" "$backup_root" >/dev/null || {
+	echo 'Refusing: configuration backup contains invalid management state.' >&2
+	exit 1
+}
+for path in \
+	etc/config/dropbear \
+	etc/config/firewall \
+	etc/config/network \
+	etc/config/uhttpd \
+	etc/config/wireless \
+	etc/nwa50be-management-cidr \
+	etc/shadow; do
+	cmp -s "$root/$path" "$backup_root/$path" || {
+		echo "Refusing: configuration backup does not match live $path" >&2
+		exit 1
+	}
+done
+if [ -s "$root/etc/dropbear/authorized_keys" ]; then
+	cmp -s "$root/etc/dropbear/authorized_keys" \
+		"$backup_root/etc/dropbear/authorized_keys" || {
+		echo 'Refusing: configuration backup SSH key does not match the live key.' >&2
+		exit 1
+	}
+fi
+
+"$sysupgrade_bin" -T -f "$backup" "$image"
+trap - EXIT HUP INT TERM
+exec "$sysupgrade_bin" -f "$backup" "$image"

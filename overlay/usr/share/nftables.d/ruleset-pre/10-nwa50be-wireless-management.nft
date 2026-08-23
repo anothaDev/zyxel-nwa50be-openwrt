@@ -1,3 +1,5 @@
+destroy table bridge nwa50be_management
+
 table bridge nwa50be_management {
 	chain input {
 		type filter hook input priority -200; policy accept;

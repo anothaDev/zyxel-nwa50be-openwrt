@@ -118,6 +118,7 @@ for path in \
 	etc/uci-defaults/zzzz-nwa50be-community \
 	etc/modules.d/ath12k etc/init.d/ath12k_dyn_dbg_enable.sh \
 	root/nwa50be-setup usr/libexec/nwa50be-management-state \
+	usr/sbin/nwa50be-sysupgrade \
 	usr/share/nwa50be/99-wireless-isolation \
 	usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft \
 	lib/firmware/ath12k/IPQ5332/hw1.0/caldata.bin \
@@ -131,7 +132,8 @@ for path in \
 	etc/sysupgrade.conf \
 	etc/uci-defaults/zzzz-nwa50be-community \
 	root/nwa50be-setup \
-	usr/libexec/nwa50be-management-state; do
+	usr/libexec/nwa50be-management-state \
+	usr/sbin/nwa50be-sysupgrade; do
 	cmp -s "$tmp/rootfs/$path" "$openwrt/files/$path"
 done
 
@@ -161,6 +163,9 @@ grep -Fq 'management_state="$root/usr/libexec/nwa50be-management-state"' \
 grep -Fq 'firewall.$zone.input=REJECT' \
 	"$tmp/rootfs/etc/uci-defaults/zzzz-nwa50be-community"
 test -x "$tmp/rootfs/usr/libexec/nwa50be-management-state"
+test -x "$tmp/rootfs/usr/sbin/nwa50be-sysupgrade"
+grep -Fq '"$sysupgrade_bin" -T -f "$backup" "$image"' \
+	"$tmp/rootfs/usr/sbin/nwa50be-sysupgrade"
 grep -Fq '[ "$prefix" -eq 32 ]' "$tmp/rootfs/root/nwa50be-setup"
 grep -Fq '[ "$prefix" -eq 32 ]' \
 	"$tmp/rootfs/usr/libexec/nwa50be-management-state"
@@ -183,6 +188,8 @@ if grep -Fq 'uhttpd.main.listen_http=' \
 	exit 1
 fi
 grep -Fq 'iifname "phy6g-ap*" drop' \
+	"$tmp/rootfs/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$tmp/rootfs/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 
 grep -Eq '^uhttpd - 2026\.06\.16~7b1bec45-r1$' \

@@ -82,6 +82,9 @@ if [ -z "$management_cidr" ]; then
 	uci -q set network.lan.device='br-lan'
 	uci -q set network.lan.proto='dhcp'
 	uci -q set network.lan.delegate='0'
+	# This downstream netifd passes the literal value "auto" to udhcpc as hex.
+	[ "$(uci -q get network.globals.dhcp_default_duid)" = 'auto' ] && \
+		uci -q delete network.globals.dhcp_default_duid
 	uci -q commit network
 fi
 

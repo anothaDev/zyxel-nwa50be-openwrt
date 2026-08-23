@@ -55,6 +55,10 @@ printf '%s\n' '192.0.2.21/32' \
 	>"$management_root/etc/nwa50be-management-cidr"
 printf '%s\n' 'ssh-ed25519 test-key nwa50be-test' \
 	>"$management_root/etc/dropbear/authorized_keys"
+mkdir -p "$management_root/etc/config"
+for config in dropbear firewall network uhttpd wireless; do
+	printf 'config %s\n' "$config" >"$management_root/etc/config/$config"
+done
 printf '%s\n' 'root:$6$test-hash:20000:0:99999:7:::' \
 	>"$management_root/etc/shadow"
 
@@ -104,6 +108,7 @@ printf '%s\n' '#!/bin/sh' \
 	'for argument in "$@"; do printf " %s" "$argument" >>"$NWA50BE_TEST_LOG"; done' \
 	'printf "\\n" >>"$NWA50BE_TEST_LOG"' \
 	'[ "$*" = "-q get firewall.@zone[0]" ] && exit 1' \
+	'[ "$*" = "-q get network.globals.dhcp_default_duid" ] && { printf "%s\\n" auto; exit 0; }' \
 	'[ "$*" = "-q show firewall" ] && { printf "%s\\n" "firewall.guest=zone"; exit 0; }' \
 	'exit 0' >"$tmp/bin/uci"
 printf '%s\n' '#!/bin/sh' \
@@ -156,6 +161,62 @@ fi
 printf '%s\n' 'ssh-ed25519 test-key nwa50be-test' \
 	>"$management_root/etc/dropbear/authorized_keys"
 
+upgrade_log="$tmp/upgrade.log"
+upgrade_backup="$tmp/upgrade-backup.tar.gz"
+upgrade_image="$tmp/sysupgrade.tar"
+printf '%s\n' 'test-image' >"$upgrade_image"
+printf '%s\n' '#!/bin/sh' \
+	'printf "%s\\n" "$*" >>"$NWA50BE_TEST_LOG"' \
+	'case "$1" in' \
+	'  -b)' \
+	'    if [ "${NWA50BE_TEST_INCOMPLETE:-0}" = 1 ]; then' \
+	'      tar -C "$NWA50BE_TEST_ROOT" -czf "$2" \
+	        etc/config/dropbear etc/config/firewall etc/config/network \
+	        etc/config/uhttpd etc/config/wireless \
+	        etc/nwa50be-management-cidr etc/shadow \
+	        etc/dropbear/authorized_keys' \
+	'    else' \
+	'      tar -C "$NWA50BE_TEST_ROOT" -czf "$2" \
+	        etc/config/dropbear etc/config/firewall etc/config/network \
+	        etc/config/uhttpd etc/config/wireless \
+	        etc/nwa50be-setup-complete etc/nwa50be-management-cidr \
+	        etc/shadow etc/dropbear/authorized_keys' \
+	'    fi' \
+	'    ;;' \
+	'  -T|-f) exit 0 ;;' \
+	'  *) exit 1 ;;' \
+	'esac' >"$tmp/bin/mock-sysupgrade"
+chmod 0755 "$tmp/bin/mock-sysupgrade"
+
+NWA50BE_ROOT="$management_root" \
+NWA50BE_TEST_ROOT="$management_root" \
+NWA50BE_TEST_LOG="$upgrade_log" \
+NWA50BE_SYSUPGRADE_BIN="$tmp/bin/mock-sysupgrade" \
+NWA50BE_BACKUP_PATH="$upgrade_backup" \
+	"$project/overlay/usr/sbin/nwa50be-sysupgrade" "$upgrade_image"
+grep -Fxq -- "-b $upgrade_backup" "$upgrade_log"
+grep -Fxq -- "-T -f $upgrade_backup $upgrade_image" "$upgrade_log"
+grep -Fxq -- "-f $upgrade_backup $upgrade_image" "$upgrade_log"
+
+: >"$upgrade_log"
+if NWA50BE_ROOT="$management_root" \
+	NWA50BE_TEST_ROOT="$management_root" \
+	NWA50BE_TEST_LOG="$upgrade_log" \
+	NWA50BE_TEST_INCOMPLETE=1 \
+	NWA50BE_SYSUPGRADE_BIN="$tmp/bin/mock-sysupgrade" \
+	NWA50BE_BACKUP_PATH="$upgrade_backup" \
+	"$project/overlay/usr/sbin/nwa50be-sysupgrade" \
+	"$upgrade_image" >"$tmp/incomplete-upgrade.log" 2>&1; then
+	echo 'Refusing: upgrade wrapper accepted an incomplete backup.' >&2
+	exit 1
+fi
+grep -Fq 'configuration backup is missing etc/nwa50be-setup-complete' \
+	"$tmp/incomplete-upgrade.log"
+if grep -Eq '^-T |^-f ' "$upgrade_log"; then
+	echo 'Refusing: incomplete backup reached an upgrade invocation.' >&2
+	exit 1
+fi
+
 rm -f "$management_root/etc/nwa50be-setup-complete"
 : >"$firstboot_log"
 NWA50BE_ROOT="$management_root" \
@@ -166,9 +227,15 @@ grep -Fq 'service dropbear disable' "$firstboot_log"
 grep -Fq 'service rpcd disable' "$firstboot_log"
 grep -Fq 'service uhttpd disable' "$firstboot_log"
 grep -Fq 'uci -q delete network.lan' "$firstboot_log"
+grep -Fq 'uci -q delete network.globals.dhcp_default_duid' "$firstboot_log"
 if grep -Fq 'firewall.nwa50be_management.src_ip=' "$firstboot_log"; then
 	echo 'Refusing: unprovisioned boot exposed remote management.' >&2
 	exit 1
 fi
+
+grep -Fxq 'destroy table bridge nwa50be_management' \
+	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'adapter RX to AP pin 2 (TX)' "$project/docs/INSTALL.md"
+grep -Fq 'pin 3 (RX)' "$project/docs/INSTALL.md"
 
 echo 'Security regression tests passed.'

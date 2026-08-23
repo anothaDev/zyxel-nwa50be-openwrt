@@ -11,9 +11,10 @@ official Zyxel image, and not ready for unattended installation.
 
 One NWA50BE was unlocked through Zyxel's official waiver flow, RAM-booted,
 backed up, installed to NAND, cold-booted, and exercised in a routed deployment.
-Those live observations were collected before the publication-hardening changes
-in this candidate. The current candidate has been rebuilt and structurally
-verified, but has not yet been installed on hardware.
+The publication-hardening candidate was subsequently installed and recovered
+from a verified configuration backup after the OpenWrt snapshot's explicit
+`sysupgrade -f` requirement was identified. A normal reboot then preserved the
+recovered state and passed the routed acceptance checks.
 
 - OpenWrt 25.12.3 with TIP/OpenWiFi `v5.1.0-rc1`
 - Persistent squashfs plus UBIFS overlay on the 60 MiB NAND `rootfs` partition
@@ -73,8 +74,9 @@ evidence.
 - SPI NOR remains disabled from Linux.
 - Radios boot disabled.
 - HTTPS LuCI and SSH stay disabled until serial setup establishes credentials
-  and one wired administrator `/32`. Provisioned upgrades preserve that state,
-  the SSH key, and HTTPS/SSH access only for the recorded host.
+  and one wired administrator `/32`. Provisioned upgrades use the
+  `nwa50be-sysupgrade` wrapper to create, verify, and explicitly pass the backup;
+  HTTPS/SSH remain restricted to the recorded host.
 - Cleartext HTTP stays disabled, HTTP keep-alive is off, and wireless bridge
   ports cannot reach the AP management plane.
 - Country code and regulatory limits are never bypassed.
