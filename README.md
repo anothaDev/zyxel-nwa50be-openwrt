@@ -7,6 +7,15 @@ OpenWrt image on the Zyxel NWA50BE, including the QCN6432 wide-band radio in
 This is an experimental source-only project. It is not upstream OpenWrt, not an
 official Zyxel image, and not ready for unattended installation.
 
+> [!CAUTION]
+> **This is not an easy or risk-free firmware flash.** The official unlock can
+> erase the stock installation and may prevent normal restoration. This build
+> requires calibration from the exact target device, has no writable A/B
+> rollback slot, and can require 3.3 V UART plus TFTP recovery after a mistake or
+> failed boot. Do not proceed without verified backups, serial access, recovery
+> experience, and acceptance that the AP can become unusable. No warranty or
+> recovery guarantee is provided.
+
 ## What was verified
 
 One NWA50BE was unlocked through Zyxel's official waiver flow, RAM-booted,
@@ -19,7 +28,8 @@ recovered state and passed the routed acceptance checks.
 - OpenWrt 25.12.3 with TIP/OpenWiFi `v5.1.0-rc1`
 - Persistent squashfs plus UBIFS overlay on the 60 MiB NAND `rootfs` partition
 - SPI NOR, bootloader, environment, and ART inaccessible from Linux
-- 2.5 GbE full duplex with no interface errors, drops, or collisions
+- 2.5 GbE full duplex with zero driver-reported hardware error, drop, CRC, and
+  FIFO-overflow counters at the five-day checkpoint
 - QCN6432 in 6 GHz LPI mode, channel 5, EHT160
 - More than 2 Gbit/s negotiated client PHY rates and more than 1 Gbit/s
   measured throughput in close-range testing
@@ -27,9 +37,12 @@ recovered state and passed the routed acceptance checks.
 - Optional cross-BSS bridge-port isolation while preserving same-BSS printer
   access
 - Repeated cold boots with stable Ethernet and BSS MAC addresses
+- More than five days of continuous post-recovery operation without an observed
+  radio crash, watchdog, DFS event, or Ethernet link-down event
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for the acceptance evidence and
-its limits.
+its limits. The security review and remediation boundary are documented in
+[docs/SECURITY.md](docs/SECURITY.md).
 
 ## The software limitation
 

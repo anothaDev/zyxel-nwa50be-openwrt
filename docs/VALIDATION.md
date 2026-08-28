@@ -48,7 +48,8 @@ checks establish artifact structure and policy, not hardware behavior.
 ## Networking
 
 - AP uplink negotiated 2500Base-T full duplex.
-- Interface counters showed zero errors, drops, collisions, and output errors.
+- At initial acceptance, interface counters showed zero errors, drops,
+  collisions, and output errors.
 - A 60-packet routed management sample completed with 0% loss and sub-millisecond
   latency.
 - AP-originated public-IP and DNS tests completed successfully.
@@ -69,6 +70,29 @@ checks establish artifact structure and policy, not hardware behavior.
   normal 2.4 GHz, two on compatibility, and four on the 160 MHz high-band BSS.
 - Cross-BSS isolation blocked normal-to-compatibility traffic while the printer
   remained reachable from a client on the same compatibility BSS.
+
+## Five-day soak checkpoint
+
+A read-only checkpoint on 2026-08-28 found:
+
+- 5 days and 2 hours of continuous uptime after the recovery reboot;
+- 20 of 20 routed management probes returned, with 0% loss and 0.361 ms average
+  latency;
+- all three BSSes remained active with multiple associated clients;
+- the high-band BSS remained on channel 5 at 160 MHz, while both 2.4 GHz BSSes
+  remained on channel 6 at 20 MHz;
+- retained logs contained no firmware crash, fatal assertion, watchdog,
+  DFS/radar, or Ethernet link-down event; and
+- Ethernet hardware counters reported zero receive/transmit errors, CRC errors,
+  FIFO overflow, and hardware drops.
+
+Linux's aggregate `rx_dropped` counter was 15,231. It did not increase during a
+10-second sample, while the driver-reported hardware drop counters remained
+zero. The source and timing of the accumulated Linux counter were not
+established, so it is recorded rather than treated as proof of an active link
+fault or ignored as harmless.
+
+This is a point-in-time soak result, not a long-term reliability guarantee.
 
 ## Known limits
 

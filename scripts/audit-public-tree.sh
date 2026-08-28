@@ -9,6 +9,8 @@ project=$(
 )
 private_ipv4_pattern='10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}'
 private_pattern='/home/[^/:[:space:]]+/|/Users/[^/:[:space:]]+/|[A-Za-z]:\\Users\\[^\\:[:space:]]+\\|BEGIN [A-Z0-9 ]*PRIVATE KEY|ssh-(rsa|ed25519) AAAA|tailscale|@omarchy|Galaxy S25|warranty-waiver token|github_pat_[[:alnum:]_]{20,}|gh[oprsu]_[[:alnum:]]{20,}'
+mac_pattern='([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}'
+unlock_token_pattern='[[:xdigit:]]{32}:[[:alnum:]+/]{80,}={0,2}\.[[:xdigit:]]{64}'
 
 for command in find grep sh; do
 	command -v "$command" >/dev/null 2>&1 || {
@@ -47,6 +49,13 @@ if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
 	exit 1
 fi
 
+if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
+	--exclude='audit-public-tree.sh' "$unlock_token_pattern" \
+	"$project" >/dev/null; then
+	echo 'Refusing: Zyxel-style unlock token found.' >&2
+	exit 1
+fi
+
 if command -v git >/dev/null 2>&1 && \
 	git -C "$project" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	if git -C "$project" log --all -p -- . \
@@ -64,6 +73,20 @@ if command -v git >/dev/null 2>&1 && \
 		exit 1
 	fi
 
+	if git -C "$project" log --all -p -- . \
+		':(exclude)scripts/audit-public-tree.sh' | \
+		grep -Ea "$unlock_token_pattern" >/dev/null; then
+		echo 'Refusing: Git history contains a Zyxel-style unlock token.' >&2
+		exit 1
+	fi
+
+	if git -C "$project" log --all -p -- . \
+		':(exclude)scripts/audit-public-tree.sh' | \
+		grep -Ea "$mac_pattern" >/dev/null; then
+		echo 'Refusing: Git history contains a literal MAC address.' >&2
+		exit 1
+	fi
+
 	if git -C "$project" rev-list --objects --all | \
 		grep -Eai '\.(bin|img|ubi|tar|tar\.gz)$|(^|/)(authorized_keys|caldata\.bin|cal-ahb-[^ ]*\.bin)$' \
 		>/dev/null; then
@@ -74,7 +97,7 @@ fi
 
 if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
 	--exclude='audit-public-tree.sh' \
-	'([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' "$project" >/dev/null; then
+	"$mac_pattern" "$project" >/dev/null; then
 	echo 'Refusing: literal MAC address found.' >&2
 	exit 1
 fi
