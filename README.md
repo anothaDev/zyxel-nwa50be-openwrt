@@ -16,6 +16,35 @@ official Zyxel image, and not ready for unattended installation.
 > experience, and acceptance that the AP can become unusable. No warranty or
 > recovery guarantee is provided.
 
+## UART pinout
+
+Viewed from above using the board's pin-1 triangle:
+
+```text
+       pin-1 triangle
+             v
+AP header:  [1] [2] [3] [4]
+             NC  TX  RX  GND
+                 |   |   |
+USB-UART:        RX  TX  GND
+```
+
+| AP pin | Signal | Connect to |
+| ---: | --- | --- |
+| 1 | NC | Leave unconnected |
+| 2 | TX | Adapter RX |
+| 3 | RX | Adapter TX |
+| 4 | GND | Adapter GND |
+
+> [!WARNING]
+> **3.3 V means TTL logic level, not a power connection.** Power the AP through
+> PoE and connect only RX, TX, and GND. Never connect the adapter's `VCC`,
+> `3V3`, or `5V` lead to pin 1 or any other AP header pin. Never use RS-232
+> voltage levels.
+
+Confirm the board revision and pin-1 triangle before wiring. See
+[docs/INSTALL.md](docs/INSTALL.md) for the complete procedure.
+
 ## What was verified
 
 One NWA50BE was unlocked through Zyxel's official waiver flow, RAM-booted,
