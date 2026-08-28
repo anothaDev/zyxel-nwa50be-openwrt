@@ -14,7 +14,9 @@ respective upstream licenses.
 
 Each patch carries an SPDX identifier. Applicable license texts are included
 under `LICENSES/`; the root `LICENSE` covers only this project's original
-scripts and documentation.
+scripts and documentation. `NOTICE` retains the concrete upstream copyright
+and Apache NOTICE attributions for the BSD, ISC, and LuCI source represented in
+the patch files.
 
 The pinned TIP/OpenWiFi repository is published under BSD-3-Clause and publicly
 contains the Qualcomm firmware consumed by the NWA50BE profile. However, the
