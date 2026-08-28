@@ -23,8 +23,10 @@ custom firmware is outside normal warranty and support coverage:
 ## UART
 
 Use a 3.3 V TTL adapter. Connect adapter RX to AP pin 2 (TX), adapter TX to AP
-pin 3 (RX), and ground to AP pin 4. Never connect adapter VCC and never use
-RS-232 voltage levels.
+pin 3 (RX), and ground to AP pin 4. Power the AP through PoE. The adapter's
+3.3 V setting describes its UART logic level; it does not authorize a power
+connection. Never connect adapter `VCC`, `3V3`, or `5V` to pin 1 or any other
+AP header pin, and never use RS-232 voltage levels.
 
 The standard four-pin orientation, viewed using the board's pin-1 triangle, is:
 

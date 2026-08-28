@@ -271,5 +271,11 @@ grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fq 'adapter RX to AP pin 2 (TX)' "$project/docs/INSTALL.md"
 grep -Fq 'pin 3 (RX)' "$project/docs/INSTALL.md"
+grep -Fq 'AP header:  [1] [2] [3] [4]' "$project/README.md"
+grep -Fq 'NC  TX  RX  GND' "$project/README.md"
+grep -Fq '3.3 V means TTL logic level, not a power connection' \
+	"$project/README.md"
+grep -Fq 'Never connect adapter `VCC`, `3V3`, or `5V`' \
+	"$project/docs/INSTALL.md"
 
 echo 'Security regression tests passed.'
