@@ -8,5 +8,29 @@ BSD-3-Clause license in LICENSE. Patch files modify upstream works and remain
 subject to the licenses of the files they modify. The build consumes the
 Telecom Infra Project OpenWiFi tree and OpenWrt; see docs/LICENSING.md.
 
+Upstream attribution notices retained for source represented in patch files:
+
+- Telecom Infra Project wlan-ap package wrappers (`0008`, `0009`, `0015`):
+  Copyright (c) 2024, Telecom Infra Project.
+- NWA50BE device tree (`0001`, `0005`):
+  Copyright (c) 2020-2021 The Linux Foundation. All rights reserved.
+  Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+- ath12k debug helper (`0006`):
+  Copyright (c) 2020 The Linux Foundation. All rights reserved.
+  Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+- ucode (`0007`):
+  Copyright (c) 2021 Jo-Philipp Wich <jo@mein.io>.
+
+The LuCI patches (`0014`, `0018`, `0020`) retain this upstream NOTICE:
+
+  LuCI - Lua Configuration Interface
+  Copyright 2008 Steven Barth <steven@midlink.org>
+  Copyright 2008 Jo-Philipp Wich <jow@openwrt.org>
+  Licensed under the Apache License, Version 2.0.
+
+  Contains code from:
+  coxpcall - Copyright 2005 - Kepler Project (www.keplerproject.org)
+  ltn12/luasocket - Copyright 2004-2007 Diego Nehab
+
 No Qualcomm firmware blobs, device ART data, calibration data, credentials,
 unlock tokens, or prebuilt firmware images are distributed by this repository.
