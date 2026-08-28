@@ -12,12 +12,15 @@ private_pattern='/home/[^/:[:space:]]+/|/Users/[^/:[:space:]]+/|[A-Za-z]:\\Users
 mac_pattern='([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}'
 unlock_token_pattern='[[:xdigit:]]{32}:[[:alnum:]+/]{80,}={0,2}\.[[:xdigit:]]{64}'
 
-for command in find grep sh; do
+for command in find grep python3 sh; do
 	command -v "$command" >/dev/null 2>&1 || {
 		echo "Missing required command: $command" >&2
 		exit 1
 	}
 done
+
+python3 -c 'compile(open(__import__("sys").argv[1], "rb").read(), __import__("sys").argv[1], "exec")' \
+	"$project/scripts/check-luci-mount-acl.py"
 
 forbidden_files=$(find "$project" \
 	\( -path "$project/.git" -o -path "$project/work" -o -path "$project/artifacts" \) \

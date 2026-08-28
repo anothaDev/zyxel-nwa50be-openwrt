@@ -1,0 +1,64 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] luci: escape DHCP lease fields before table rendering
+SPDX-License-Identifier: Apache-2.0
+
+Backport OpenWrt LuCI commit 55379d04fcc3 ("luci-mod-network,
+luci-mod-status: escape DHCP lease hostname and MAC vendor fields").
+Bare lease strings otherwise reach LuCI's innerHTML table path, as tracked
+by GHSA-686p-p8p9-x6fh.
+
+---
+ .../htdocs/luci-static/resources/view/network/dhcp.js       | 6 +++---
+ .../luci-static/resources/view/status/include/40_dhcp.js    | 6 +++---
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/modules/luci-mod-network/htdocs/luci-static/resources/view/network/dhcp.js b/modules/luci-mod-network/htdocs/luci-static/resources/view/network/dhcp.js
+--- a/modules/luci-mod-network/htdocs/luci-static/resources/view/network/dhcp.js
++++ b/modules/luci-mod-network/htdocs/luci-static/resources/view/network/dhcp.js
+@@ -284,9 +284,9 @@ return view.extend({
+ 								host = lease.hostname;
+ 
+ 							const columns = [
+-								host || '-',
++								'%h'.format(host || '-'),
+ 								lease.ipaddr,
+-								vendor ? lease.macaddr + vendor : lease.macaddr,
++								'%h'.format(vendor ? lease.macaddr + vendor : lease.macaddr),
+ 								lease.duid || '-',
+ 								lease.iaid || '-',
+ 								exp
+@@ -323,7 +323,7 @@ return view.extend({
+ 								host = name;
+ 
+ 							const columns = [
+-								host || '-',
++								'%h'.format(host || '-'),
+ 								lease.ip6addrs ? lease.ip6addrs.join('<br />') : lease.ip6addr,
+ 								lease.duid,
+ 								lease.iaid,
+diff --git a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/40_dhcp.js b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/40_dhcp.js
+--- a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/40_dhcp.js
++++ b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/40_dhcp.js
+@@ -140,9 +140,9 @@ return baseclass.extend({
+ 				vendor = macaddr[lease.macaddr.toLowerCase()]?.vendor ?? null;
+ 
+ 			const columns = [
+-				host || '-',
++				'%h'.format(host || '-'),
+ 				lease.ipaddr,
+-				vendor ? lease.macaddr + ` (${vendor})` : lease.macaddr,
++				'%h'.format(vendor ? lease.macaddr + ` (${vendor})` : lease.macaddr),
+ 				lease.duid || '-',
+ 				lease.iaid || '-',
+ 				exp,
+@@ -208,7 +208,7 @@ return baseclass.extend({
+ 				disabled = true;
+ 
+ 			const columns = [
+-				host || '-',
++				'%h'.format(host || '-'),
+ 				lease.ip6addrs ? lease.ip6addrs.join('<br />') : lease.ip6addr,
+ 				duid || '-',
+ 				iaid || '-',
+-- 
+2.51.0

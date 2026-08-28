@@ -12,10 +12,12 @@ a normal reboot and a new live acceptance run. The source now provides a
 fail-closed `nwa50be-sysupgrade` wrapper; that wrapper itself has automated
 coverage but has not been used for another live flash.
 
-## Candidate artifact checks
+## Latest unflashed artifact checks
 
-`scripts/build.sh` completed a full local build and
-`scripts/verify-artifacts.sh` accepted all four NWA50BE images. The verifier:
+On 2026-08-28, `scripts/build.sh` completed a clean local build and
+`scripts/verify-artifacts.sh` accepted all four NWA50BE images. This artifact
+set remains private and has not been installed on the validation AP. The
+verifier:
 
 - checks every staged file against `SHA256SUMS`;
 - extracts and structurally validates the DTB from both initramfs and the
@@ -30,11 +32,21 @@ coverage but has not been used for another live flash.
 - requires the NWA50BE upgrade wrapper to create, inspect, test, and explicitly
   pass a configuration backup with `sysupgrade -f`;
 - requires the packaged SSDK init script to match the NWA50BE profile; and
-- verifies the pinned uHTTPd and OpenSSL package versions in the image manifest.
+- requires uHTTPd `2026.08.03~60f64bec-r1`, OpenSSL `3.5.8-r1`, cgi-io
+  `2026.07.21~31cb3c89-r1`, and uMDNS `2026.06.16~1b5e7bf1-r1` in the image
+  manifest;
+- requires the already-fixed procd `2026.03.13~58eb263d-r1` and jsonfilter
+  `2026.03.16~b9034210-r1` revisions;
+- rejects the stale LuCI mount ACL write grant to root's crontab;
+- requires the LuCI Wi-Fi scan and DHCP lease field escaping fixes; and
+- rejects reviewed advisory-affected packages that are not part of the image's
+  intended package set, including both odhcpd server variants.
 
 The prepared-source fingerprint also passed after the build, proving the build
 did not alter its tracked, untracked, configuration, or overlay inputs. These
-checks establish artifact structure and policy, not hardware behavior.
+checks establish artifact structure and policy, not hardware behavior. Live
+validation below applies to the previously installed candidate, not this newer
+unflashed build.
 
 ## Boot and storage
 

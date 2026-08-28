@@ -65,9 +65,9 @@ The project documents the evidence and avoids claims about intent. See
 
 ## Why there is no downloadable firmware image
 
-The working image requires per-device ART calibration. The validated private
-build also contained a device-specific admin key and build-host metadata. Those
-must never be published.
+The working image requires per-device ART calibration. Earlier exploratory
+builds also contained device-specific administrator material and build-host
+metadata. Those must never be published.
 
 This repository therefore builds a local image only after the owner supplies a
 private 1 MiB ART backup. The ART file and extracted calibration remain ignored

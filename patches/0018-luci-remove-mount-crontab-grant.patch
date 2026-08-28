@@ -1,0 +1,26 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] luci-mod-system: remove stale mount crontab grant
+SPDX-License-Identifier: Apache-2.0
+
+Backport OpenWrt LuCI commit 903af348552f ("luci-mod-system: cleanup
+mount ACL group"). The mount-management ACL does not need write access
+to root's crontab. Keeping that stale grant allows a delegated mount
+operator to escalate to root, as tracked by GHSA-v5f9-62c7-cw29.
+
+---
+ .../root/usr/share/rpcd/acl.d/luci-mod-system.json           | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json b/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json
+--- a/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json
++++ b/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json
+@@ -130,7 +130,6 @@
+ 		},
+ 		"write": {
+ 			"file": {
+-				"/etc/crontabs/root": [ "write" ],
+ 				"/bin/umount": [ "exec" ],
+ 				"/sbin/block": [ "exec" ]
+ 			},
+-- 
+2.51.0

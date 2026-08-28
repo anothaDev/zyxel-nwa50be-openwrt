@@ -72,13 +72,21 @@ git -C "$tree" apply --check --reverse "$project/patches/0015-qca-ssdk-qca-keep-
 git -C "$openwrt" apply --check --reverse "$project/patches/0002-openwrt-refresh-initramfs-payload.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0010-openwrt-neutralize-external-apk-origin.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0011-openwrt-update-uhttpd-security.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0012-openwrt-update-openssl-3.5.7.patch"
+git -C "$openwrt" apply --check --reverse "$project/patches/0012-openwrt-update-openssl-3.5.8.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0013-openwrt-remove-default-root-password.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0016-openssl-disable-unused-quic.patch"
+git -C "$openwrt" apply --check --reverse "$project/patches/0019-openwrt-update-umdns-security.patch"
+git -C "$openwrt/feeds/packages" apply --check --reverse \
+	"$project/patches/0017-packages-update-cgi-io-security.patch"
 git -C "$openwrt/feeds/luci" apply --check --reverse \
 	"$project/patches/0014-luci-remove-package-manager-dependency.patch"
+git -C "$openwrt/feeds/luci" apply --check --reverse \
+	"$project/patches/0018-luci-remove-mount-crontab-grant.patch"
+git -C "$openwrt/feeds/luci" apply --check --reverse \
+	"$project/patches/0020-luci-escape-dhcp-lease-fields.patch"
 git -C "$tree" diff --check
 git -C "$openwrt" diff --check
+git -C "$openwrt/feeds/packages" diff --check
 git -C "$openwrt/feeds/luci" diff --check
 git -C "$tree" diff --quiet HEAD -- \
 	feeds/qca-wifi-7/qca-ssdk-qca/files/qca-ssdk
@@ -143,14 +151,35 @@ grep -Fxq 'destroy table bridge nwa50be_management' \
 grep -Fxq 'ath12k frame_mode=1 cold_boot_cal=0 mlo_capable=0' \
 	"$overlay/etc/modules.d/ath12k"
 
-grep -q '^PKG_SOURCE_VERSION:=7b1bec45826bd78c8afc993435bdc0f1df2fe399$' \
+grep -q '^PKG_SOURCE_VERSION:=60f64bec40c8113cf09815ec377761b1f4f95f22$' \
 	"$openwrt/package/network/services/uhttpd/Makefile"
-grep -q '^PKG_VERSION:=3.5.7$' "$openwrt/package/libs/openssl/Makefile"
+grep -q '^PKG_VERSION:=3.5.8$' "$openwrt/package/libs/openssl/Makefile"
 grep -q '^OPENSSL_OPTIONS:= shared no-tests no-quic$' \
 	"$openwrt/package/libs/openssl/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=31cb3c89f02d918d7f17bf62a80c852fc38a1ca1$' \
+	"$openwrt/feeds/packages/net/cgi-io/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=1b5e7bf1cec775b89f1a6068dc0b9df3593b5986$' \
+	"$openwrt/package/network/services/umdns/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=58eb263d5abe03f8c1280bdfa65a3b052614215d$' \
+	"$openwrt/package/system/procd/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=b9034210bd331749673416c6bf389cccd4e23610$' \
+	"$openwrt/package/utils/jsonfilter/Makefile"
+
+"$project/scripts/check-luci-mount-acl.py" \
+	"$openwrt/feeds/luci/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json"
+test "$(grep -Fo "'%h'.format(host || '-')" \
+	"$openwrt/feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/dhcp.js" | \
+	wc -l)" -eq 2
+test "$(grep -Fo "'%h'.format(host || '-')" \
+	"$openwrt/feeds/luci/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/40_dhcp.js" | \
+	wc -l)" -eq 2
+grep -Fq 'document.createTextNode(`${res?.ssid}`)' \
+	"$openwrt/feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js"
 
 grep -q '^CONFIG_TARGET_ROOTFS_INITRAMFS=y$' "$openwrt/.config"
 grep -q '^CONFIG_TARGET_ROOTFS_SQUASHFS=y$' "$openwrt/.config"
+grep -q '^# CONFIG_PACKAGE_odhcpd is not set$' "$openwrt/.config"
+grep -q '^# CONFIG_PACKAGE_odhcpd-ipv6only is not set$' "$openwrt/.config"
 grep -q '^CONFIG_PACKAGE_luci-ssl-openssl=y$' "$openwrt/.config"
 grep -q '^# CONFIG_PACKAGE_luci-app-package-manager is not set$' "$openwrt/.config"
 grep -q '^# CONFIG_PACKAGE_mtd is not set$' "$openwrt/.config"

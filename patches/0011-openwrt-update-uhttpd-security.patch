@@ -1,10 +1,13 @@
 From: NWA50BE community build <noreply@invalid.example>
-Subject: [PATCH] uhttpd: update past request-smuggling fixes
+Subject: [PATCH] uhttpd: update through August 2026 security fixes
 SPDX-License-Identifier: GPL-2.0-only
 
-OpenWrt 25.12.5 updates uhttpd past CVE-2026-55612,
-CVE-2026-55613, and CVE-2026-55614. Keep the pinned TIP base while
-backporting the same reviewed uhttpd source revision and mirror hash.
+Update past CVE-2026-55612, CVE-2026-55613, CVE-2026-55614, and the
+July/August fixes tracked as GHSA-vhx4-3p5q-m59q,
+GHSA-2mpg-6wp5-435p, GHSA-c2wg-hcff-hqrm,
+GHSA-83vv-qrc6-h3hx, and GHSA-wvgh-cm54-q6f6. Keep the pinned TIP
+base while using the reviewed source revision and mirror hash selected
+by the current OpenWrt main branch.
 
 ---
  package/network/services/uhttpd/Makefile | 6 +++---
@@ -22,9 +25,9 @@ index 6ec45bb5e9..b48a6f3992 100644
 -PKG_SOURCE_DATE:=2025-10-03
 -PKG_SOURCE_VERSION:=ebb92e6b339b88bbc6b76501b6603c52d4887ba1
 -PKG_MIRROR_HASH:=2d00da72db0ec08132bb169f2bad0b153bd998ea1eee0700b4ec01e65c35127d
-+PKG_SOURCE_DATE:=2026-06-16
-+PKG_SOURCE_VERSION:=7b1bec45826bd78c8afc993435bdc0f1df2fe399
-+PKG_MIRROR_HASH:=ee52821b04cc78f46875e9870b6ed41670606d6b90fb31b31312666c4ed809dd
++PKG_SOURCE_DATE:=2026-08-03
++PKG_SOURCE_VERSION:=60f64bec40c8113cf09815ec377761b1f4f95f22
++PKG_MIRROR_HASH:=702b8df1ba868db13ae93b28ddaa9c421bcbfa34e8633cae984029e7b50ec59f
  PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
  PKG_LICENSE:=ISC
  

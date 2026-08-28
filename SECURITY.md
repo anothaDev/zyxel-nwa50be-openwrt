@@ -34,7 +34,8 @@ This is a downstream OpenWrt 25.12.3/TIP base with the selective backports
 listed in `docs/BUILD.md`; it is not claimed to contain every security change
 from a later upstream OpenWrt release. Before publication, every relevant
 OpenWrt 25.12.5 or subsequent advisory must be backported, removed, disabled,
-or given an explicit exposure-based disposition in the release review.
+or given an explicit exposure-based disposition in the release review. The
+current review cutoff and dispositions are recorded in `docs/SECURITY.md`.
 
 ## Supported state
 

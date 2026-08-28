@@ -1,0 +1,31 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] umdns: update past CVE-2026-55492
+SPDX-License-Identifier: GPL-2.0-only
+
+Update umdns to the revision selected by OpenWrt 25.12.5. This bounds
+the unauthenticated mDNS cache and clamps hostile TTLs, fixing the
+adjacent-network memory-exhaustion issue tracked as CVE-2026-55492.
+
+---
+ package/network/services/umdns/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/package/network/services/umdns/Makefile b/package/network/services/umdns/Makefile
+--- a/package/network/services/umdns/Makefile
++++ b/package/network/services/umdns/Makefile
+@@ -10,9 +10,9 @@ PKG_NAME:=umdns
+ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/mdnsd.git
+ PKG_SOURCE_PROTO:=git
+-PKG_SOURCE_DATE:=2026-02-06
+-PKG_SOURCE_VERSION:=a52cdb354d13c179150d2ba26f9f8a51d418b43d
+-PKG_MIRROR_HASH:=64d6b454aefd208881a130ec0d503e690375565ed3de0171a8c70f5d1a4a25bf
++PKG_SOURCE_DATE:=2026-06-16
++PKG_SOURCE_VERSION:=1b5e7bf1cec775b89f1a6068dc0b9df3593b5986
++PKG_MIRROR_HASH:=7d9ec860af2b8217f65cd4af92a61be1925ad171dee9b536c4914cc0080e3303
+ 
+ PKG_MAINTAINER:=John Crispin <john@phrozen.org>
+ PKG_LICENSE:=LGPL-2.1
+-- 
+2.51.0

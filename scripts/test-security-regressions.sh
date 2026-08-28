@@ -18,6 +18,38 @@ mkdir -p "$tmp/bin" "$tmp/openwrt"
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$tmp/bin/make"
 chmod 0755 "$tmp/bin/make"
 
+cat >"$tmp/safe-acl.json" <<'EOF'
+{
+	"luci-mod-system-mounts": {
+		"write": {
+			"file": {
+				"/bin/umount": [ "exec" ]
+			}
+		}
+	}
+}
+EOF
+"$project/scripts/check-luci-mount-acl.py" "$tmp/safe-acl.json"
+
+cat >"$tmp/vulnerable-acl.json" <<'EOF'
+{
+	"luci-mod-system-mounts": {
+		"write": {
+			"file": {
+				"/etc/crontabs/root": [ "write" ]
+			}
+		}
+	}
+}
+EOF
+if "$project/scripts/check-luci-mount-acl.py" \
+	"$tmp/vulnerable-acl.json" >"$tmp/vulnerable-acl.log" 2>&1; then
+	echo 'Refusing: vulnerable LuCI mount ACL passed verification.' >&2
+	exit 1
+fi
+grep -Fq 'LuCI mount ACL can still write the root crontab' \
+	"$tmp/vulnerable-acl.log"
+
 printf '%s\n' 'CONFIG_ATTACK=y' >"$tmp/openwrt/.config"
 printf '%s\n' 'CONFIG_ATTACK=y' 'CONFIG_ATTACK/e id;#=y' \
 	>"$tmp/malicious.seed"
@@ -100,7 +132,7 @@ printf '%s\n' '#!/bin/sh' \
 	'printf "service %s %s\\n" "$(basename "$0")" "$*" >>"$NWA50BE_TEST_LOG"' \
 	>"$tmp/bin/fake-service"
 chmod 0755 "$tmp/bin/fake-service"
-for service in dropbear firewall rpcd sysntpd uhttpd; do
+for service in dnsmasq dropbear firewall odhcpd rpcd sysntpd uhttpd; do
 	cp "$tmp/bin/fake-service" "$management_root/etc/init.d/$service"
 done
 printf '%s\n' '#!/bin/sh' \
@@ -125,6 +157,8 @@ PATH="$tmp/bin:$PATH" \
 	/bin/sh "$project/overlay/etc/uci-defaults/zzzz-nwa50be-community"
 
 grep -Fq 'service dropbear enable' "$firstboot_log"
+grep -Fq 'service odhcpd disable' "$firstboot_log"
+grep -Fq 'service odhcpd stop' "$firstboot_log"
 grep -Fq 'service rpcd enable' "$firstboot_log"
 grep -Fq 'service uhttpd enable' "$firstboot_log"
 grep -Fq 'uci -q set firewall.lan.input=REJECT' "$firstboot_log"

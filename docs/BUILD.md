@@ -28,12 +28,16 @@ because committer metadata changes it without changing source content.
 | `0008` | Force only the nested qca-ssdk-shell source build to remain serial. |
 | `0009` | Ignore qca-nss-phy's empty package-assembly init-script probe. |
 | `0010` | Keep absolute external-feed paths out of APK package-origin metadata. |
-| `0011` | Backport OpenWrt 25.12.5's uhttpd update past three request-smuggling fixes. |
-| `0012` | Backport OpenWrt 25.12.5's OpenSSL 3.5.7 security update. |
+| `0011` | Update uHTTPd through the 2026-08-03 upstream security fixes. |
+| `0012` | Update to the OpenSSL 3.5.8 security release. |
 | `0013` | Remove TIP's public development root password before first boot. |
 | `0014` | Remove LuCI's package-manager dependency for this downstream target. |
 | `0015` | Select the SSDK profile init script without modifying tracked source. |
 | `0016` | Disable unused OpenSSL QUIC code, removing the CVE-2026-14456 attack surface. |
+| `0017` | Update cgi-io past CVE-2026-62947. |
+| `0018` | Remove LuCI mount management's stale root-crontab write grant. |
+| `0019` | Update uMDNS past CVE-2026-55492. |
+| `0020` | Escape untrusted DHCP lease fields before LuCI table rendering. |
 
 `qca-ssdk-shell` has a broken generated-dependency bootstrap. After target
 kernel compilation, the build runs it at `-j1` for at most six passes before
@@ -102,6 +106,10 @@ This downstream target has no compatible binary package repository. The build
 therefore removes LuCI package management and ships no active remote APK feeds.
 Do not point the device at generic OpenWrt repositories: kernel modules and
 other ABI-sensitive packages will not match the Qualcomm/TIP build.
+
+The unused `odhcpd` and `odhcpd-ipv6only` server packages are excluded. The
+separate `odhcp6c` client remains available for obtaining upstream IPv6
+configuration.
 
 ## Build identity
 

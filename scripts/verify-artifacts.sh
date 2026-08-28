@@ -5,6 +5,12 @@
 
 set -eu
 
+project=$(
+	unset CDPATH
+	cd -- "$(dirname -- "$0")/.."
+	pwd
+)
+
 usage() {
 	echo "usage: $0 <prepared-wlan-ap-directory> <artifact-directory>" >&2
 	exit 2
@@ -124,7 +130,10 @@ for path in \
 	lib/firmware/ath12k/IPQ5332/hw1.0/caldata.bin \
 	lib/firmware/ath12k/QCN6432/hw1.0/cal-ahb-soc@0:wifi2@c0000000.bin \
 	sbin/sysupgrade usr/sbin/ubiformat usr/sbin/ubiupdatevol \
-	www/cgi-bin/luci www/luci-static/bootstrap/cascade.css; do
+	www/cgi-bin/luci www/luci-static/bootstrap/cascade.css \
+	www/luci-static/resources/view/network/dhcp.js \
+	www/luci-static/resources/view/network/wireless.js \
+	www/luci-static/resources/view/status/include/40_dhcp.js; do
 	test -e "$tmp/rootfs/$path"
 done
 
@@ -192,15 +201,44 @@ grep -Fq 'iifname "phy6g-ap*" drop' \
 grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$tmp/rootfs/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 
-grep -Eq '^uhttpd - 2026\.06\.16~7b1bec45-r1$' \
+grep -Eq '^uhttpd - 2026\.08\.03~60f64bec-r1$' \
 	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
-grep -Eq '^libopenssl3 - 3\.5\.7-r1$' \
+grep -Eq '^libopenssl3 - 3\.5\.8-r1$' \
 	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
+grep -Eq '^cgi-io - 2026\.07\.21~31cb3c89-r1$' \
+	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
+grep -Eq '^umdns - 2026\.06\.16~1b5e7bf1-r1$' \
+	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
+grep -Eq '^procd - 2026\.03\.13~58eb263d-r1$' \
+	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
+grep -Eq '^jsonfilter - 2026\.03\.16~b9034210-r1$' \
+	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
+
+"$project/scripts/check-luci-mount-acl.py" \
+	"$tmp/rootfs/usr/share/rpcd/acl.d/luci-mod-system.json"
+test "$(grep -Fo "'%h'.format(host||'-')" \
+	"$tmp/rootfs/www/luci-static/resources/view/network/dhcp.js" | wc -l)" -eq 2
+test "$(grep -Fo "'%h'.format(host||'-')" \
+	"$tmp/rootfs/www/luci-static/resources/view/status/include/40_dhcp.js" | wc -l)" -eq 2
+grep -Fq 'document.createTextNode(`${res?.ssid}`)' \
+	"$tmp/rootfs/www/luci-static/resources/view/network/wireless.js"
 if grep -Eq '^luci-app-package-manager ' \
 	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"; then
 	echo 'Refusing: unsupported LuCI package manager is installed.' >&2
 	exit 1
 fi
+for package in \
+	odhcpd odhcpd-ipv6only ead luci-lib-px5g luci-app-https-dns-proxy \
+	luci-app-adblock-fast luci-app-bmx7 luci-app-banip luci-app-upnp \
+	luci-app-travelmate luci-app-advanced-reboot luci-proto-openvpn \
+	luci-app-dockerman luci-app-samba4 luci-app-tailscale-community \
+	luci-app-lxc; do
+	if grep -Eq "^${package} " \
+		"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"; then
+		echo "Refusing: security-disposition package is unexpectedly installed: $package" >&2
+		exit 1
+	fi
+done
 if grep -Ev '^[[:space:]]*(#|$)' \
 	"$tmp/rootfs/etc/apk/repositories.d/distfeeds.list" >/dev/null; then
 	echo 'Refusing: remote package feeds are enabled.' >&2

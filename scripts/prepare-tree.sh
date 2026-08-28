@@ -93,9 +93,10 @@ for patch in \
 	0002-openwrt-refresh-initramfs-payload.patch \
 	0010-openwrt-neutralize-external-apk-origin.patch \
 	0011-openwrt-update-uhttpd-security.patch \
-	0012-openwrt-update-openssl-3.5.7.patch \
+	0012-openwrt-update-openssl-3.5.8.patch \
 	0013-openwrt-remove-default-root-password.patch \
-	0016-openssl-disable-unused-quic.patch; do
+	0016-openssl-disable-unused-quic.patch \
+	0019-openwrt-update-umdns-security.patch; do
 	git -C "$tree/openwrt" apply --check "$project/patches/$patch"
 	git -C "$tree/openwrt" apply "$project/patches/$patch"
 done
@@ -107,10 +108,17 @@ cp "$project/patches/0007-ucode-fix-const-string-pointers.patch" \
 (
 	cd "$tree/openwrt"
 	./scripts/gen_config.py zyxel_nwa50be
-	git -C feeds/luci apply --check \
-		"$project/patches/0014-luci-remove-package-manager-dependency.patch"
-	git -C feeds/luci apply \
-		"$project/patches/0014-luci-remove-package-manager-dependency.patch"
+	git -C feeds/packages apply --check \
+		"$project/patches/0017-packages-update-cgi-io-security.patch"
+	git -C feeds/packages apply \
+		"$project/patches/0017-packages-update-cgi-io-security.patch"
+	for patch in \
+		0014-luci-remove-package-manager-dependency.patch \
+		0018-luci-remove-mount-crontab-grant.patch \
+		0020-luci-escape-dhcp-lease-fields.patch; do
+		git -C feeds/luci apply --check "$project/patches/$patch"
+		git -C feeds/luci apply "$project/patches/$patch"
+	done
 	./scripts/feeds install \
 		luci-ssl-openssl luci-theme-bootstrap luci-mod-admin-full \
 		luci-mod-network luci-mod-status luci-mod-system \
