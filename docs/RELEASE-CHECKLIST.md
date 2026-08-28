@@ -7,11 +7,11 @@ Passing the source checklist does not authorize publishing firmware images.
 
 - [x] No GitHub tags, releases, Actions artifacts, or packages exist.
 - [x] Actions is restricted to the required SHA-pinned actions.
-- [ ] The visibility transition is complete and `main` blocks force-pushes and
+- [x] The visibility transition is complete and `main` blocks force-pushes and
       deletion, requires the `audit` check, and applies the rule to
       administrators. If those controls cannot be configured immediately after
       the repository becomes public, restore private visibility.
-- [ ] `scripts/audit-public-tree.sh` passes from a fresh clone.
+- [x] `scripts/audit-public-tree.sh` passes from a fresh clone.
 - [x] Reachable Git history passed the private-data and forbidden-file audit.
 - [x] Commit author metadata is project-neutral.
 - [x] No private files are present in reachable Git objects, releases, Actions
@@ -25,7 +25,7 @@ Passing the source checklist does not authorize publishing firmware images.
 - [x] A clean private artifact build passed structural, package, security, and
       build-metadata verification; it remains device-specific and private.
 - [x] Public claims distinguish observation, inference, and unknown intent.
-- [ ] An unauthenticated clone of the public repository passes the same audit.
+- [x] An unauthenticated clone of the public repository passes the same audit.
 
 ## Binary release blockers
 
