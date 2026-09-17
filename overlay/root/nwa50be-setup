@@ -106,7 +106,7 @@ uci -q set firewall.nwa50be_management_ping.icmp_type='echo-request'
 uci -q set "firewall.nwa50be_management_ping.src_ip=$management_cidr"
 uci -q set firewall.nwa50be_management_ping.target='ACCEPT'
 uci -q commit firewall
-/etc/init.d/firewall restart
+/etc/init.d/firewall reload
 
 for service in rpcd uhttpd; do
 	"/etc/init.d/$service" enable

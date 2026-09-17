@@ -141,10 +141,19 @@ The corrected policy combines:
 - TCP 22 and 443 plus ICMP allowed only from one recorded wired `/32`;
 - key-only SSH with port forwarding disabled;
 - HTTPS-only LuCI with HTTP keep-alive disabled; and
-- bridge-family nftables drops for every 2.4, 5, and 6 GHz AP interface.
+- bridge-family nftables drops for every ingress except the supported wired
+  uplink, `eth0`, including renamed wireless and MLO interfaces.
 
 Management services remain usable from the provisioned wired host while
 wireless-originated management traffic is rejected before the IP allowlist.
+
+The September 17 review replaced interface-name patterns with the wired-port
+allowlist above. Other bridge-port names, including VLAN subinterfaces such as
+`eth0.10`, are denied by default and require deliberate review before use. This
+is an ingress-interface check, not an independent VLAN-tag filter. Serial setup
+now uses firewall reload so policy replacement occurs in one nftables transaction, avoiding the
+unfiltered interval of stop/start. Changing the administrator address does not
+by itself revoke every preexisting connection; this is not a revocation tool.
 
 ## Package and writable-storage boundaries
 
@@ -193,6 +202,25 @@ tests the image with that backup, and explicitly passes it using `sysupgrade
 for another live flash.
 
 ## Verification boundary
+
+### Restored configuration erased by cloud provisioning defaults
+
+A September 17 review of the complete startup sequence found a second,
+independent configuration-loss path in the August 28 candidate. After backup
+restoration, `99-ucentral-network` removes network interfaces/devices and
+firewall sections. `zzz-ucentral` commits those deletions and regenerates the
+network when no cloud configuration shadow is restored. The final local policy
+sees the preserved setup marker and intentionally leaves the network untouched,
+so the wired LAN can be lost despite a valid backup and successful image test.
+
+This standalone image now overrides both cloud defaults with no-ops at their
+original paths. The local first-boot policy remains responsible for fresh
+setup, management containment, and retaining provisioned networking. Regression
+tests execute these overrides before the local policy; artifact verification
+byte-compares both packaged files against the reviewed overlay. This corrects
+the startup interaction; hardware upgrade acceptance is still required.
+
+### Earlier validation
 
 The installed AP has the June uHTTPd revision and OpenSSL 3.5.7, HTTPS-only and
 wired-only management, key-only SSH, restricted write surfaces, and more than

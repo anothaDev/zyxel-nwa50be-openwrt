@@ -14,7 +14,7 @@ coverage but has not been used for another live flash.
 
 ## Latest unflashed artifact checks
 
-On 2026-08-28, `scripts/build.sh` completed a clean local build and
+On 2026-09-17, `scripts/build.sh` completed a local incremental build and
 `scripts/verify-artifacts.sh` accepted all four NWA50BE images. This artifact
 set remains private and has not been installed on the validation AP. The
 verifier:
@@ -31,6 +31,8 @@ verifier:
   package feeds, and no LuCI package manager;
 - requires the NWA50BE upgrade wrapper to create, inspect, test, and explicitly
   pass a configuration backup with `sysupgrade -f`;
+- byte-compares both cloud-provisioning overrides and the wired-ingress guard
+  against the reviewed overlay;
 - requires the packaged SSDK init script to match the NWA50BE profile; and
 - requires uHTTPd `2026.08.03~60f64bec-r1`, OpenSSL `3.5.8-r1`, cgi-io
   `2026.07.21~31cb3c89-r1`, and uMDNS `2026.06.16~1b5e7bf1-r1` in the image
@@ -47,6 +49,37 @@ did not alter its tracked, untracked, configuration, or overlay inputs. These
 checks establish artifact structure and policy, not hardware behavior. Live
 validation below applies to the previously installed candidate, not this newer
 unflashed build.
+
+## September 17 startup and management regressions
+
+The August 28 image had a second configuration-loss path: inherited cloud
+defaults erased the restored LAN before the community policy ran. An isolated
+replay used that exact image's full rootfs, actual `uci_apply_defaults`
+dispatcher, and ARM UCI, jshn, and jsonfilter binaries under QEMU. The original
+defaults lost the static LAN and bridge despite returning success. Replacing
+only `99-ucentral-network` and `zzz-ucentral` with the new overrides preserved
+the LAN, wired `/32`, key-only SSH, HTTPS-only policy, and byte-identical
+wireless, password, and authorized-key fixtures.
+
+The replay used synthetic configuration, host static BusyBox, and stubbed
+service actions in isolated filesystem/PID/network namespaces. It skipped the
+hardware-only U-Boot environment-discovery default. It did not test NAND
+restoration, actual service startup, or hardware boot.
+
+A separate isolated network-namespace test exercised the exact new bridge
+guard with a minimal counterpart of the fw4 IPv4 management policy. All 17 TCP
+cases passed: authorized wired 22/443 allowed; unauthorized wired sources and
+port 80 blocked; spoofed authorized sources arriving on `phy2g-ap0`,
+`phy6g-ap0`, `wlan0`, `ap-mld0`, and `eth0.10` blocked; repeated guard reloads
+retained authorized access. The old guard failed the same test on `wlan0`.
+Static neighbor entries ensured this tested IP filtering rather than only ARP
+blocking. The harness used host Linux 7.2.3 and nftables 1.1.7, synthetic TCP
+listeners, and no live AP interfaces; target hardware and nftables 1.1.6 remain
+distinct acceptance boundaries.
+
+Repository security regressions, public-tree audit, prepared-tree verification,
+and rebuilt-artifact verification passed. No firmware was flashed or AP
+configuration changed during this checkpoint.
 
 ## Boot and storage
 

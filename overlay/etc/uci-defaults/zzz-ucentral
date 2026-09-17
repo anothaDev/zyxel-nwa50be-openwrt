@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Local configuration is authoritative in this standalone image.
+# The inherited cloud default replaces network and management settings with
+# factory values. Leave both restored state and fresh-install policy to
+# zzzz-nwa50be-community instead of creating a cloud config-shadow.
+exit 0

@@ -94,6 +94,11 @@ git -C "$tree" diff --quiet HEAD -- \
 cmp -s "$project/patches/0007-ucode-fix-const-string-pointers.patch" \
 	"$openwrt/package/utils/ucode/patches/130-fix-const-string-pointers.patch"
 diff -qr "$project/overlay" "$overlay" -x lib
+for script in 99-ucentral-network zzz-ucentral; do
+	test -f "$overlay/etc/uci-defaults/$script"
+	cmp -s "$project/overlay/etc/uci-defaults/$script" \
+		"$overlay/etc/uci-defaults/$script"
+done
 test -z "$(find "$overlay" -type l -print -quit)"
 
 calibration_files=$(find "$overlay/lib" -type f -printf '%P\n' | sort)
@@ -144,7 +149,7 @@ if grep -Ev '^[[:space:]]*(#|$)' \
 	exit 1
 fi
 test -f "$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
-grep -Fq 'iifname "phy6g-ap*" drop' \
+grep -Fq 'iifname != "eth0" drop' \
 	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
