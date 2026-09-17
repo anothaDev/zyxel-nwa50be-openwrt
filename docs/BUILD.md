@@ -4,13 +4,13 @@
 
 The build is pinned to:
 
-- TIP/OpenWiFi tag `v5.1.0-rc1`
-- TIP commit `122d893d88a6762bffeac54c5f87b37407cefe7a`
+- TIP/OpenWiFi tag `v5.1.0`
+- TIP commit `5b797b292359436ccf17d5d367a46bda75fc260a`
 - OpenWrt base commit `a5652f421c6f6e548fb801a93b2cd2ae13eca631`
-- TIP-patched OpenWrt tree `a0fa511453f26becffbde594f46103ab9bad57a7`
+- TIP-patched OpenWrt tree `6dce2f66f457d2f4de0046da03bfd0d85577aba0`
 
 The TIP tag is lightweight and unsigned. The OpenWrt `v25.12.3` tag was signed,
-but this project consumes TIP's 124-patch OpenWrt result and records its Git
+but this project consumes TIP's 125-patch OpenWrt result and records its Git
 tree object separately. The generated commit ID is intentionally not pinned
 because committer metadata changes it without changing source content.
 
@@ -19,18 +19,27 @@ because committer metadata changes it without changing source content.
 [TIP/OpenWiFi v5.1.0 final](https://github.com/Telecominfraproject/wlan-ap/releases/tag/v5.1.0)
 was released on September 1 at commit
 `5b797b292359436ccf17d5d367a46bda75fc260a`. It retains the NWA50BE profile
-and is 12 commits ahead of this project's pinned release candidate. The
+and is 12 commits ahead of this project's previous release candidate. The
 [comparison](https://github.com/Telecominfraproject/wlan-ap/compare/122d893d88a6762bffeac54c5f87b37407cefe7a...v5.1.0)
 includes a same-radio cross-VAP ath12k stale-peer fix and hostapd/uCentral
 configuration and strict-forwarding fixes; it does not change the OpenWrt base
 pin or the kernel baseline. The GitHub release has no uploaded firmware assets.
 
-This repository has **not** been rebased to that release. The September 17
-candidate retains the pins above plus the reviewed local hardening and
-configuration-preservation fixes. A final-release rebase needs separate patch,
-dependency, build, artifact, and hardware validation; an upstream cloud image
-is not a substitute for this standalone image or its device-specific
-calibration and management policy.
+This repository now targets that release while retaining the local hardening,
+configuration-preservation, flash-boundary, and explicit-MLO policies. Review
+found an unmatched lock release in the new stale-peer path; patch `0021`
+corrects it. The source-derived lock regression rejects the unmodified final
+release and checks six control-flow cases after correction. See
+[SECURITY.md](SECURITY.md) for reachability and test limits.
+
+Artifact validation also rejected a joined `v5.1.0-rc2 v5.1.0` label: both
+tags identify the same commit. Patch `0022` selects one exact tag, preferring
+final over prerelease. Five real-Git test cases cover duplicate tags,
+annotated prereleases, and untagged development commits.
+
+The final-release candidate still needs hardware upgrade and wireless
+acceptance. An upstream cloud image is not a substitute for this standalone
+image or its device-specific calibration and management policy.
 
 ## Project patch stack
 
@@ -56,6 +65,8 @@ calibration and management policy.
 | `0018` | Remove LuCI mount management's stale root-crontab write grant. |
 | `0019` | Update uMDNS past CVE-2026-55492. |
 | `0020` | Escape untrusted DHCP lease fields before LuCI table rendering. |
+| `0021` | Remove an unmatched ath12k lock release in TIP 5.1.0 stale-peer recovery. |
+| `0022` | Select one exact TIP release label, preferring final over prerelease tags on the same commit. |
 
 `qca-ssdk-shell` has a broken generated-dependency bootstrap. After target
 kernel compilation, the build runs it at `-j1` for at most six passes before
@@ -66,6 +77,12 @@ recreates the target build directory. A clean tree succeeded on pass 5. This
 avoids redistributing a patch from a source repository that does not state
 redistribution terms.
 
+If an incremental rebuild fails in libradcli's install hook because
+`libfreeradius-client.so` already exists, clean only that package's generated
+output with `make -C <prepared-tree>/openwrt package/feeds/packages/libradcli/clean`
+and rerun the build. This does not change its source or version; do not ignore
+the failed install or treat its incomplete output as an accepted image.
+
 TIP's Kconfig currently prints recursive-dependency diagnostics for the
 unselected `kmod-qca-nss-ecm-premium`, `kmod-qca-nss-ecm-wifi-plugin`,
 `cig-device-boot`, and `kmod-usb-serial-xr` packages during `defconfig`. The
@@ -75,8 +92,9 @@ nonzero `defconfig` exit as a failure.
 ## Host requirements
 
 Use a recent Linux distribution with the normal OpenWrt build dependencies,
-Git, Python 3 with PyYAML, rsync, GNU make, `flock`, `fdtget` (normally provided
-by a device-tree-compiler package), and enough disk space for a complete ipq53xx
+Git, Python 3 with PyYAML, a host C compiler (`cc`), rsync, GNU make, `flock`,
+`fdtget` (normally provided by a device-tree-compiler package), and enough disk
+space for a complete ipq53xx
 build. The scripts use every available CPU by default; override with `JOBS`.
 One repository-level lock prevents concurrent builds from corrupting shared
 OpenWrt staging state.
@@ -97,7 +115,7 @@ calibration.
 
 ## Prepare and build
 
-The destination normally must not exist. After TIP's exact 124-patch setup has
+The destination normally must not exist. After TIP's exact 125-patch setup has
 completed, preparation may resume that exact pinned upstream state if project
 patching has not started. The script refuses every other existing tree and
 never resets or cleans a checkout.

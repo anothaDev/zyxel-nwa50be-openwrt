@@ -1,0 +1,18 @@
+SPDX-License-Identifier: GPL-2.0-only
+
+TIP's rc2 and final tags point to the same commit. Select one exact version
+tag, preferring a final release, instead of joining every tag into one label.
+An untagged development commit must still return no label, not an older tag.
+
+--- a/scripts/getver.sh
++++ b/scripts/getver.sh
+@@ -11,7 +11,8 @@
+ 
+ [ "$1" = "wlan-ap-version" ] && {
+ 	cd ..
+-	git tag --points-at HEAD
++	git describe --tags --exact-match --match 'v[0-9]*' --exclude '*-*' HEAD 2>/dev/null ||
++		git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null || true
+ 	exit 0
+ }
+ 
