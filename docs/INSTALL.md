@@ -153,6 +153,12 @@ Do not invoke plain `sysupgrade <image>` for a provisioned AP. `sysupgrade -n`
 also deliberately removes the saved state and returns the AP to serial-only
 setup.
 
+Images built before the September 17, 2026 provisioning fix are unsuitable for
+this remote path even with `-f`: inherited `99-ucentral-network` and
+`zzz-ucentral` defaults erase restored network state on first boot. The current
+overlay replaces both with no-ops and artifact verification checks their exact
+contents. Use a freshly verified candidate containing those overrides.
+
 Remote upgrade prevents an intentional management lockout, but it cannot
 recover a failed boot. Without UART, a NAND or kernel failure remains
 unrecoverable over the network.

@@ -139,7 +139,10 @@ done
 
 for path in \
 	etc/sysupgrade.conf \
+	etc/uci-defaults/99-ucentral-network \
+	etc/uci-defaults/zzz-ucentral \
 	etc/uci-defaults/zzzz-nwa50be-community \
+	usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft \
 	root/nwa50be-setup \
 	usr/libexec/nwa50be-management-state \
 	usr/sbin/nwa50be-sysupgrade; do
@@ -196,7 +199,7 @@ if grep -Fq 'uhttpd.main.listen_http=' \
 	echo 'Refusing: first-boot policy still configures cleartext HTTP.' >&2
 	exit 1
 fi
-grep -Fq 'iifname "phy6g-ap*" drop' \
+grep -Fq 'iifname != "eth0" drop' \
 	"$tmp/rootfs/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$tmp/rootfs/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"

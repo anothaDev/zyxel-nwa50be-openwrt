@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+# This standalone image is provisioned by zzzz-nwa50be-community.
+# The inherited cloud default deletes all network interfaces and firewall
+# sections, including a configuration just restored by sysupgrade -f.
+# Override it at the same pathname so upgrades retain the wired LAN.
+exit 0

@@ -151,6 +151,19 @@ printf '%s\n' '#!/bin/sh' \
 	>"$tmp/bin/logger"
 chmod 0755 "$tmp/bin/uci" "$tmp/bin/wifi" "$tmp/bin/logger"
 
+# Provisioning defaults run before the local policy on each upgraded rootfs.
+# They must leave restored LAN, firewall, and credentials untouched.
+for script in 99-ucentral-network zzz-ucentral; do
+	NWA50BE_ROOT="$management_root" \
+	NWA50BE_TEST_LOG="$firstboot_log" \
+	PATH="$tmp/bin:$PATH" \
+		/bin/sh "$project/overlay/etc/uci-defaults/$script"
+done
+if [ -s "$firstboot_log" ]; then
+	echo 'Refusing: cloud provisioning defaults modified restored configuration.' >&2
+	exit 1
+fi
+
 NWA50BE_ROOT="$management_root" \
 NWA50BE_TEST_LOG="$firstboot_log" \
 PATH="$tmp/bin:$PATH" \
@@ -269,6 +282,13 @@ fi
 
 grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'iifname != "eth0" drop' \
+	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fxq '/etc/init.d/firewall reload' "$project/overlay/root/nwa50be-setup"
+if grep -Fq '/etc/init.d/firewall restart' "$project/overlay/root/nwa50be-setup"; then
+	echo 'Refusing: setup removes the firewall during a policy update.' >&2
+	exit 1
+fi
 grep -Fq 'adapter RX to AP pin 2 (TX)' "$project/docs/INSTALL.md"
 grep -Fq 'pin 3 (RX)' "$project/docs/INSTALL.md"
 grep -Fq 'AP header:  [1] [2] [3] [4]' "$project/README.md"

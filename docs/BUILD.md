@@ -14,6 +14,24 @@ but this project consumes TIP's 124-patch OpenWrt result and records its Git
 tree object separately. The generated commit ID is intentionally not pinned
 because committer metadata changes it without changing source content.
 
+### Upstream refresh checkpoint: 2026-09-17
+
+[TIP/OpenWiFi v5.1.0 final](https://github.com/Telecominfraproject/wlan-ap/releases/tag/v5.1.0)
+was released on September 1 at commit
+`5b797b292359436ccf17d5d367a46bda75fc260a`. It retains the NWA50BE profile
+and is 12 commits ahead of this project's pinned release candidate. The
+[comparison](https://github.com/Telecominfraproject/wlan-ap/compare/122d893d88a6762bffeac54c5f87b37407cefe7a...v5.1.0)
+includes a same-radio cross-VAP ath12k stale-peer fix and hostapd/uCentral
+configuration and strict-forwarding fixes; it does not change the OpenWrt base
+pin or the kernel baseline. The GitHub release has no uploaded firmware assets.
+
+This repository has **not** been rebased to that release. The September 17
+candidate retains the pins above plus the reviewed local hardening and
+configuration-preservation fixes. A final-release rebase needs separate patch,
+dependency, build, artifact, and hardware validation; an upstream cloud image
+is not a substitute for this standalone image or its device-specific
+calibration and management policy.
+
 ## Project patch stack
 
 | Patch | Purpose |
