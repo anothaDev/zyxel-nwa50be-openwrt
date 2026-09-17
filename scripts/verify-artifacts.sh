@@ -22,6 +22,11 @@ tree="$1"
 stage="$2"
 openwrt="$tree/openwrt"
 
+# Execute the reviewed collision block from the actual prepared driver source.
+# This models lock/BH balance, not firmware timing or complete station teardown.
+python3 "$project/scripts/test-ath12k-peer-lock.py" \
+	"$openwrt/build_dir/target-aarch64_cortex-a53+neon-vfpv4_musl/linux-ipq53xx_generic/backports-6.6.15/drivers/net/wireless/ath/ath12k/peer.c"
+
 initramfs="$stage/openwrt-ipq53xx-zyxel_nwa50be-initramfs-kernel.bin"
 factory="$stage/openwrt-ipq53xx-zyxel_nwa50be-squashfs-nand-factory.bin"
 ubi="$stage/openwrt-ipq53xx-zyxel_nwa50be-squashfs-nand-factory.ubi"
@@ -114,6 +119,18 @@ cmp -s "$tmp/initramfs.dtb" "$tmp/persistent.dtb"
 
 "$unsquashfs" -no-exit-code -d "$tmp/rootfs" \
 	"$tmp/sysupgrade-zyxel_nwa50be/root" >/dev/null 2>&1
+
+grep -Fxq "DISTRIB_TIP_VERSION='v5.1.0'" "$tmp/rootfs/etc/openwrt_release"
+grep -Fq 'TIP-v5.1.0-5b797b29' "$tmp/rootfs/etc/openwrt_release"
+grep -Fxq "DISTRIB_UCENTRAL_SCHEMA_REVISION='d1e90a0'" \
+	"$tmp/rootfs/etc/openwrt_release"
+python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"major": 5, "minor": 1, "patch": 0}' \
+	"$tmp/rootfs/etc/ucentral/version.json"
+grep -Fxq 'ucentral-schema - 2026.08.26~d1e90a04-r1' \
+	"$stage/openwrt-ipq53xx-zyxel_nwa50be.manifest"
+grep -Fq 'config_add_string uci_section' "$tmp/rootfs/lib/netifd/hostapd.sh"
+cmp -s "$tmp/rootfs/lib/netifd/hostapd.sh" \
+	"$tree/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/hostapd.sh"
 
 for path in \
 	etc/NWA50BE_PERSISTENT_BUILD \

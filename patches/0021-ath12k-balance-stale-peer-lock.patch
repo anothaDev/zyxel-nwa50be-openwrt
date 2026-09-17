@@ -1,0 +1,26 @@
+SPDX-License-Identifier: BSD-3-Clause-Clear
+
+Remove the unmatched unlock from TIP 5.1.0's stale-peer recovery patch.
+ath12k_peer_delete() balances its own lock sections and returns with dp_lock
+unheld. Reacquire it directly before the bounded peer-table recheck.
+
+diff --git a/feeds/qca-wifi-7/mac80211/patches/ath12k/0002-QSDK-wifi-ath12k-peer-create-delete-stale-same-pdev-peer.patch b/feeds/qca-wifi-7/mac80211/patches/ath12k/0002-QSDK-wifi-ath12k-peer-create-delete-stale-same-pdev-peer.patch
+--- a/feeds/qca-wifi-7/mac80211/patches/ath12k/0002-QSDK-wifi-ath12k-peer-create-delete-stale-same-pdev-peer.patch
++++ b/feeds/qca-wifi-7/mac80211/patches/ath12k/0002-QSDK-wifi-ath12k-peer-create-delete-stale-same-pdev-peer.patch
+@@ -43,7 +43,7 @@
+ ---
+ --- a/drivers/net/wireless/ath/ath12k/peer.c
+ +++ b/drivers/net/wireless/ath/ath12k/peer.c
+-@@ -211,8 +211,52 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_link_vif *arvif,
++@@ -211,8 +211,51 @@ int ath12k_peer_create(struct ath12k *ar, struct ath12k_link_vif *arvif,
+ 	peer = ath12k_dp_link_peer_find_by_pdev_idx(ar->ab->dp, ar->pdev_idx,
+ 						    arg->peer_addr);
+ 	if (peer) {
+@@ -82,7 +82,6 @@
+ +			return ret;
+ +		}
+ +
+-+		spin_unlock_bh(&ar->ab->dp->dp_lock);
+ +		spin_lock_bh(&ar->ab->dp->dp_lock);
+ +		peer = ath12k_dp_link_peer_find_by_pdev_idx(ar->ab->dp, ar->pdev_idx,
+ +							    arg->peer_addr);

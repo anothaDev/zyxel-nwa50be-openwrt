@@ -23,9 +23,9 @@ dts="$tree/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts"
 overlay="$openwrt/files"
 
 [ -f "$tree/.nwa50be-community-prepared" ]
-[ "$(git -C "$tree" rev-parse HEAD)" = '122d893d88a6762bffeac54c5f87b37407cefe7a' ]
-[ "$(git -C "$openwrt" rev-parse 'HEAD^{tree}')" = 'a0fa511453f26becffbde594f46103ab9bad57a7' ]
-[ "$(git -C "$openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 124 ]
+[ "$(git -C "$tree" rev-parse HEAD)" = '5b797b292359436ccf17d5d367a46bda75fc260a' ]
+[ "$(git -C "$openwrt" rev-parse 'HEAD^{tree}')" = '6dce2f66f457d2f4de0046da03bfd0d85577aba0' ]
+[ "$(git -C "$openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 125 ]
 
 for feed_pin in \
 	'packages:a3bd79d5bc1bcbc1edb7053fc7d4d75e3e93e1d1' \
@@ -69,6 +69,7 @@ git -C "$tree" apply --check --reverse "$project/patches/0006-ath12k-preserve-lo
 git -C "$tree" apply --check --reverse "$project/patches/0008-qca-ssdk-shell-keep-nested-build-serial.patch"
 git -C "$tree" apply --check --reverse "$project/patches/0009-qca-nss-phy-ignore-empty-package-probe.patch"
 git -C "$tree" apply --check --reverse "$project/patches/0015-qca-ssdk-qca-keep-profile-files-read-only.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0021-ath12k-balance-stale-peer-lock.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0002-openwrt-refresh-initramfs-payload.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0010-openwrt-neutralize-external-apk-origin.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0011-openwrt-update-uhttpd-security.patch"
@@ -76,6 +77,8 @@ git -C "$openwrt" apply --check --reverse "$project/patches/0012-openwrt-update-
 git -C "$openwrt" apply --check --reverse "$project/patches/0013-openwrt-remove-default-root-password.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0016-openssl-disable-unused-quic.patch"
 git -C "$openwrt" apply --check --reverse "$project/patches/0019-openwrt-update-umdns-security.patch"
+git -C "$openwrt" apply --check --reverse "$project/patches/0022-openwrt-select-one-tip-release-label.patch"
+sh "$project/scripts/test-tip-version.sh" "$openwrt/scripts/getver.sh"
 git -C "$openwrt/feeds/packages" apply --check --reverse \
 	"$project/patches/0017-packages-update-cgi-io-security.patch"
 git -C "$openwrt/feeds/luci" apply --check --reverse \
@@ -169,6 +172,10 @@ grep -q '^PKG_SOURCE_VERSION:=58eb263d5abe03f8c1280bdfa65a3b052614215d$' \
 	"$openwrt/package/system/procd/Makefile"
 grep -q '^PKG_SOURCE_VERSION:=b9034210bd331749673416c6bf389cccd4e23610$' \
 	"$openwrt/package/utils/jsonfilter/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=d1e90a04ca5adb45643894fe3dc65802aea69e9d$' \
+	"$tree/feeds/ucentral/ucentral-schema/Makefile"
+grep -Fq 'config_add_string uci_section' \
+	"$tree/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/hostapd.sh"
 
 "$project/scripts/check-luci-mount-acl.py" \
 	"$openwrt/feeds/luci/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json"

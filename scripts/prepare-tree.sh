@@ -18,14 +18,14 @@ tree="$1"
 art="$2"
 
 tip_url='https://github.com/Telecominfraproject/wlan-ap.git'
-tip_commit='122d893d88a6762bffeac54c5f87b37407cefe7a'
-openwrt_patched_tree='a0fa511453f26becffbde594f46103ab9bad57a7'
+tip_commit='5b797b292359436ccf17d5d367a46bda75fc260a'
+openwrt_patched_tree='6dce2f66f457d2f4de0046da03bfd0d85577aba0'
 
 verify_upstream_state() {
 	[ ! -e "$tree/.nwa50be-community-prepared" ]
 	[ "$(git -C "$tree" rev-parse HEAD)" = "$tip_commit" ]
 	[ "$(git -C "$tree/openwrt" rev-parse 'HEAD^{tree}')" = "$openwrt_patched_tree" ]
-	[ "$(git -C "$tree/openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 124 ]
+	[ "$(git -C "$tree/openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 125 ]
 
 	root_status=$(git -C "$tree" status --porcelain --untracked-files=all)
 	[ -z "$root_status" ] || {
@@ -84,7 +84,8 @@ for patch in \
 	0006-ath12k-preserve-local-module-policy.patch \
 	0008-qca-ssdk-shell-keep-nested-build-serial.patch \
 	0009-qca-nss-phy-ignore-empty-package-probe.patch \
-	0015-qca-ssdk-qca-keep-profile-files-read-only.patch; do
+	0015-qca-ssdk-qca-keep-profile-files-read-only.patch \
+	0021-ath12k-balance-stale-peer-lock.patch; do
 	git -C "$tree" apply --check "$project/patches/$patch"
 	git -C "$tree" apply "$project/patches/$patch"
 done
@@ -96,7 +97,8 @@ for patch in \
 	0012-openwrt-update-openssl-3.5.8.patch \
 	0013-openwrt-remove-default-root-password.patch \
 	0016-openssl-disable-unused-quic.patch \
-	0019-openwrt-update-umdns-security.patch; do
+	0019-openwrt-update-umdns-security.patch \
+	0022-openwrt-select-one-tip-release-label.patch; do
 	git -C "$tree/openwrt" apply --check "$project/patches/$patch"
 	git -C "$tree/openwrt" apply "$project/patches/$patch"
 done

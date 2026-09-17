@@ -21,6 +21,8 @@ done
 
 python3 -c 'compile(open(__import__("sys").argv[1], "rb").read(), __import__("sys").argv[1], "exec")' \
 	"$project/scripts/check-luci-mount-acl.py"
+python3 -c 'compile(open(__import__("sys").argv[1], "rb").read(), __import__("sys").argv[1], "exec")' \
+	"$project/scripts/test-ath12k-peer-lock.py"
 
 forbidden_files=$(find "$project" \
 	\( -path "$project/.git" -o -path "$project/work" -o -path "$project/artifacts" \) \
@@ -114,13 +116,13 @@ large_files=$(find "$project" \
 	exit 1
 }
 
-for license in Apache-2.0 BSD-3-Clause GPL-2.0-only GPL-2.0-or-later ISC; do
+for license in Apache-2.0 BSD-3-Clause BSD-3-Clause-Clear GPL-2.0-only GPL-2.0-or-later ISC; do
 	test -s "$project/LICENSES/$license"
 done
 
 for patch in "$project"/patches/*.patch; do
 	test "$(grep -c '^SPDX-License-Identifier:' "$patch")" -eq 1
-	grep -Eq '^SPDX-License-Identifier: (Apache-2\.0|BSD-3-Clause|GPL-2\.0-only|ISC|\(GPL-2\.0-or-later OR BSD-3-Clause\))$' \
+	grep -Eq '^SPDX-License-Identifier: (Apache-2\.0|BSD-3-Clause|BSD-3-Clause-Clear|GPL-2\.0-only|ISC|\(GPL-2\.0-or-later OR BSD-3-Clause\))$' \
 		"$patch"
 done
 

@@ -14,10 +14,14 @@ coverage but has not been used for another live flash.
 
 ## Latest unflashed artifact checks
 
-On 2026-09-17, `scripts/build.sh` completed a local incremental build and
-`scripts/verify-artifacts.sh` accepted all four NWA50BE images. This artifact
-set remains private and has not been installed on the validation AP. The
-verifier:
+On 2026-09-17, the `v5.1.0` update received a fresh source/toolchain/kernel/package
+build, followed by a metadata-correction rebuild. The first image set was
+rejected because upstream's version generator joined the rc2 and final tags.
+Patch `0022` corrects that ambiguity; the accepted replacement passed
+`scripts/build.sh` and `scripts/verify-artifacts.sh` for all four NWA50BE images
+(230 PEBs, 30,146,560-byte UBI). A second fresh preparation with all 22 patches
+matched the build tree's input fingerprint exactly. The final artifact remains
+private and has not been installed on the validation AP. The verifier:
 
 - checks every staged file against `SHA256SUMS`;
 - extracts and structurally validates the DTB from both initramfs and the
@@ -33,6 +37,11 @@ verifier:
   pass a configuration backup with `sysupgrade -f`;
 - byte-compares both cloud-provisioning overrides and the wired-ingress guard
   against the reviewed overlay;
+- requires the exact TIP `v5.1.0` label, commit prefix, schema revision, and
+  uCentral version metadata, plus byte-exact packaged hostapd shell support;
+- executes the six-case lock/BH regression against the actual generated ath12k
+  collision block; prepared-tree verification also runs five real-Git
+  version-label cases;
 - requires the packaged SSDK init script to match the NWA50BE profile; and
 - requires uHTTPd `2026.08.03~60f64bec-r1`, OpenSSL `3.5.8-r1`, cgi-io
   `2026.07.21~31cb3c89-r1`, and uMDNS `2026.06.16~1b5e7bf1-r1` in the image
@@ -49,6 +58,27 @@ did not alter its tracked, untracked, configuration, or overlay inputs. These
 checks establish artifact structure and policy, not hardware behavior. Live
 validation below applies to the previously installed candidate, not this newer
 unflashed build.
+
+### Accepted 5.1.0 image startup and packet tests
+
+Three isolated replays used the accepted image's exact defaults and ARM
+configuration tools without source-overlay substitutions. Provisioned key-only
+SSH and HTTPS retained the saved static LAN, wired `/32`, password, key, and
+wireless settings. A keyless saved configuration retained HTTPS but disabled
+SSH. An unprovisioned fixture produced DHCP LAN with no management allowlist,
+no credentials or setup marker, disabled management/cloud services and radios,
+and no BSS entries. All three dispatchers returned zero; the image checksum
+was unchanged before and after testing.
+
+The replay substituted host BusyBox and service-control logging stubs, used
+synthetic board/configuration fixtures, and skipped hardware-only U-Boot
+environment discovery. It does not prove NAND restoration, real service
+startup, credential usability, or hardware boot.
+
+The exact packaged bridge guard passed the same 17 isolated TCP packet cases
+described below, using host nftables 1.1.7 and Linux 7.2.3. The target nftables
+binary could not initialize its netlink connection under user-mode emulation;
+target-userland/kernel packet enforcement remains a hardware acceptance item.
 
 ## September 17 startup and management regressions
 
@@ -80,6 +110,23 @@ distinct acceptance boundaries.
 Repository security regressions, public-tree audit, prepared-tree verification,
 and rebuilt-artifact verification passed. No firmware was flashed or AP
 configuration changed during this checkpoint.
+
+## Final-image hardware acceptance gate
+
+These checks remain maintainer-owned and must be performed on the exact
+post-merge candidate, not inferred from an older image or CI success:
+
+- [ ] Record the source commit, image checksum, and successful artifact checks.
+- [ ] Keep a fresh off-device configuration backup and verify UART/TFTP recovery.
+- [ ] Confirm the backup contains networking, wireless, credentials, setup marker,
+      administrator `/32`, and SSH authorized keys; use the explicit-backup wrapper.
+- [ ] Confirm normal boot and writable UBIFS with the protected flash boundary intact.
+- [ ] Verify SSH and HTTPS from the authorized wired host, refusal from other wired
+      sources and Wi-Fi, and no cleartext HTTP listener.
+- [ ] Verify all configured BSSes, client association, DHCP, DNS, and internet traffic.
+- [ ] Exercise same-radio cross-BSS reassociation and inspect for driver errors.
+- [ ] Reboot again and confirm networking, management access, and credentials persist.
+- [ ] Complete a stability soak; no claim of long-term reliability follows from one boot.
 
 ## Boot and storage
 

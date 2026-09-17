@@ -203,6 +203,70 @@ for another live flash.
 
 ## Verification boundary
 
+### TIP 5.1.0 update: corrected stale-peer locking regression
+
+The September 17 update reviews TIP commit
+`122d893d88a6762bffeac54c5f87b37407cefe7a` through
+`5b797b292359436ccf17d5d367a46bda75fc260a`, including the three-commit
+ucentral-schema dependency update. The main review and two independent
+upstream-delta passes identified one new release blocker before remediation.
+Prior local-hardening findings were already known, limiting historical review
+independence. No second new finding was established in the reviewed delta;
+this is not a full audit of the existing kernel, vendor stack, or firmware blobs.
+
+**TIP-001: unmatched ath12k lock release** (medium severity, availability;
+high confidence; release blocking until corrected).
+The new upstream stale-peer patch releases `dp_lock`, calls
+`ath12k_peer_delete()` with the lock unheld, then releases it a second time
+before reacquiring it. The deletion helpers balance their own lock sections
+and return unlocked. On successful deletion of a stale same-radio,
+different-VAP, non-MLO peer, this violates lock ownership and bottom-half
+accounting and can destabilize the kernel or Wi-Fi service.
+
+Affected code is `ath12k_peer_create()` in the
+[pinned upstream stale-peer patch](https://github.com/Telecominfraproject/wlan-ap/blob/5b797b292359436ccf17d5d367a46bda75fc260a/feeds/qca-wifi-7/mac80211/patches/ath12k/0002-QSDK-wifi-ath12k-peer-create-delete-stale-same-pdev-peer.patch#L85),
+specifically the releases at patch lines 70 and 85 around the deletion at 77.
+Normal client activity or a client deliberately requesting a new association
+can enter peer creation, but the stale-peer precondition below is material.
+
+An ordinary active duplicate can be rejected earlier by the station-address
+hash. A failed earlier teardown can leave a datapath peer after removing that
+hash entry, which makes the new recovery branch relevant. A reliable
+unauthenticated over-the-air crash or code-execution path was not established.
+Patch `0021` removes only the redundant release and retains the bounded
+recheck under the reacquired lock.
+
+`scripts/test-ath12k-peer-lock.py` compiles the actual collision block with
+instrumented host C lock/deletion stubs. The unmodified upstream code fails
+the successful-delete and still-present-peer cases; the corrected block passes
+all six cases, also covering no peer, same VAP, existing MLO, and deletion
+failure. Artifact verification runs this check against the prepared driver
+source. This does not emulate firmware completion, concurrent CPUs, or full
+station teardown; hardware reassociation and stability testing remain required.
+
+The updated hostapd configuration string flows from trusted root-owned UCI
+configuration to structured ubus output. Updated cloud/event consumers remain
+disabled; cloud LuCI and `bridger` remain excluded. Flash geometry, calibration,
+regulatory configuration, and the kernel baseline are unchanged by this update.
+
+The Sonatype connection was unavailable, so no dependency-database clearance
+is claimed. A September 17 refresh of published GitHub advisories for
+OpenWrt core, LuCI, uHTTPd, TIP wlan-ap, and wlan-ucentral-schema found no new
+entries since the prior review. This scoped check does not replace a complete
+dependency or vendor-firmware audit.
+
+The inspected delta covers source pinning/preparation and release provenance;
+ath12k peer lookup/deletion and adjacent station cleanup; hostapd shell/ucode
+configuration, string ownership, and ubus serialization; ucentral-event bridge
+lookup and RPC; schema rendering; the excluded Maverick profile updater; and
+upstream CI/version metadata. The unchanged standalone upgrade and management
+policy is an integration boundary, not a newly complete audit of every helper.
+The build host, its toolchain/PATH, and local root administrator are trusted;
+wireless and other wired peers are not. Firmware timing, kernel concurrency,
+NAND failure recovery, proprietary blobs, and host compromise were not proven
+by this review. Maintainer-owned hardware acceptance remains unchecked in
+[VALIDATION.md](VALIDATION.md#final-image-hardware-acceptance-gate).
+
 ### Restored configuration erased by cloud provisioning defaults
 
 A September 17 review of the complete startup sequence found a second,

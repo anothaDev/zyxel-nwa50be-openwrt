@@ -20,6 +20,11 @@ Upstream attribution notices retained for source represented in patch files:
   Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
 - ucode (`0007`):
   Copyright (c) 2021 Jo-Philipp Wich <jo@mein.io>.
+- ath12k peer locking (`0021`):
+  Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
+  Copyright (c) 2021-2022, 2024-2025 Qualcomm Innovation Center, Inc.
+  All rights reserved.
+  The original TIP patch retains Tanya Singh's Signed-off-by attribution.
 
 The LuCI patches (`0014`, `0018`, `0020`) retain this upstream NOTICE:
 
