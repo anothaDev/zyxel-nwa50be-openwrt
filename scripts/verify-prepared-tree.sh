@@ -145,6 +145,8 @@ grep -Fq 'if [ -n "$soc_serial" ]; then' \
 	"$overlay/etc/uci-defaults/zzzz-nwa50be-community"
 grep -Fq "uhttpd.main.http_keepalive='0'" \
 	"$overlay/etc/uci-defaults/zzzz-nwa50be-community"
+grep -Fq "uhttpd.main.ucode_prefix='/cgi-bin/luci=/usr/share/ucode/luci/uhttpd.uc'" \
+	"$overlay/etc/uci-defaults/zzzz-nwa50be-community"
 test -f "$overlay/etc/apk/repositories.d/distfeeds.list"
 if grep -Ev '^[[:space:]]*(#|$)' \
 	"$overlay/etc/apk/repositories.d/distfeeds.list" >/dev/null; then
