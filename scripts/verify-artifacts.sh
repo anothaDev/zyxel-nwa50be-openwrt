@@ -211,6 +211,9 @@ grep -Fq 'lldpd mpskd' \
 	"$tmp/rootfs/etc/uci-defaults/zzzz-nwa50be-community"
 grep -Fq "uhttpd.main.http_keepalive='0'" \
 	"$tmp/rootfs/etc/uci-defaults/zzzz-nwa50be-community"
+grep -Fq "uhttpd.main.ucode_prefix='/cgi-bin/luci=/usr/share/ucode/luci/uhttpd.uc'" \
+	"$tmp/rootfs/etc/uci-defaults/zzzz-nwa50be-community"
+test -f "$tmp/rootfs/usr/share/ucode/luci/uhttpd.uc"
 if grep -Fq 'uhttpd.main.listen_http=' \
 	"$tmp/rootfs/etc/uci-defaults/zzzz-nwa50be-community"; then
 	echo 'Refusing: first-boot policy still configures cleartext HTTP.' >&2
