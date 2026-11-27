@@ -1,0 +1,656 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] dnsmasq: backport October 2026 security fixes
+SPDX-License-Identifier: GPL-2.0-only
+
+Carry OpenWrt main 6db25ee835 onto dnsmasq 2.93 until 2.94 is out. The
+seven upstream commits are added as patches 003 to 009 (dnsmasq commit
+in brackets; upstream marks the CVE ids as "may apply"):
+
+  003 zone_status() heap OOB read, CNVD-C-2026-590208 (f90df6c)
+  004 find_soa() subdomain test, CVE-2026-93008 (7719737)
+  005 DNSSEC TCP slot reserve, CVE-2026-93007 (11493fe)
+  006 stale TFTP cache after free, CVE-2026-93006 (cdbfb97)
+  007 DHCPv6 FQDN off-by-one, CVE-2026-93009 (a627a78)
+  008 DNSSEC wildcard name overflow, CVE-2026-93011 (145abca)
+  009 blockdata_read() heap OOB write, no CVE id yet (738c049)
+
+The context in 100 and 200 is refreshed as in main. Main's 001 and 002
+(SIGHUP reload speed-up) are not security fixes and are left out.
+---
+ package/network/services/dnsmasq/Makefile     |   2 +-
+ ...003-Fix-heap-OOB-read-in-zone_status.patch |  45 +++++
+ .../004-Fix-subdomain-test-in-find_soa.patch  |  25 +++
+ ...ce-to-many-simultaneous-TCP-connecti.patch | 152 +++++++++++++++++
+ .../006-Fix-logic-error-in-TFTP-caching.patch |  31 ++++
+ ...e-bounds-check-in-DHCPv6-FQDN-option.patch |  23 +++
+ .../008-Fix-DNS-name-buffer-overflow.patch    |  84 ++++++++++
+ ...Fix-OOB-heap-write-in-blockdata_read.patch | 157 ++++++++++++++++++
+ ...00-remove-old-runtime-kernel-support.patch |   4 +-
+ .../dnsmasq/patches/200-ubus_dns.patch        |   4 +-
+ 10 files changed, 522 insertions(+), 5 deletions(-)
+ create mode 100644 package/network/services/dnsmasq/patches/003-Fix-heap-OOB-read-in-zone_status.patch
+ create mode 100644 package/network/services/dnsmasq/patches/004-Fix-subdomain-test-in-find_soa.patch
+ create mode 100644 package/network/services/dnsmasq/patches/005-Improve-resistance-to-many-simultaneous-TCP-connecti.patch
+ create mode 100644 package/network/services/dnsmasq/patches/006-Fix-logic-error-in-TFTP-caching.patch
+ create mode 100644 package/network/services/dnsmasq/patches/007-Fix-off-by-one-bounds-check-in-DHCPv6-FQDN-option.patch
+ create mode 100644 package/network/services/dnsmasq/patches/008-Fix-DNS-name-buffer-overflow.patch
+ create mode 100644 package/network/services/dnsmasq/patches/009-Fix-OOB-heap-write-in-blockdata_read.patch
+
+diff --git a/package/network/services/dnsmasq/Makefile b/package/network/services/dnsmasq/Makefile
+index 19ae7b7..ac737f5 100644
+--- a/package/network/services/dnsmasq/Makefile
++++ b/package/network/services/dnsmasq/Makefile
+@@ -10,7 +10,7 @@ include $(TOPDIR)/rules.mk
+ PKG_NAME:=dnsmasq
+ PKG_UPSTREAM_VERSION:=2.93
+ PKG_VERSION:=$(subst test,~~test,$(subst rc,~rc,$(PKG_UPSTREAM_VERSION)))
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_UPSTREAM_VERSION).tar.xz
+ PKG_SOURCE_URL:=https://thekelleys.org.uk/dnsmasq/
+diff --git a/package/network/services/dnsmasq/patches/003-Fix-heap-OOB-read-in-zone_status.patch b/package/network/services/dnsmasq/patches/003-Fix-heap-OOB-read-in-zone_status.patch
+new file mode 100644
+index 0000000..1b66dc7
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/003-Fix-heap-OOB-read-in-zone_status.patch
+@@ -0,0 +1,45 @@
++From f90df6c532fdcb3d0f9ed2d60cd53fd85856f2d3 Mon Sep 17 00:00:00 2001
++From: =?UTF-8?q?=E6=9C=B1=E8=80=80=E8=BE=89?= <zhuyaohui@stu.scu.edu.cn>
++Date: Thu, 1 Oct 2026 15:34:53 +0100
++Subject: [PATCH] Fix heap OOB read in zone_status()
++MIME-Version: 1.0
++Content-Type: text/plain; charset=UTF-8
++Content-Transfer-Encoding: 8bit
++
++Credit to Yaohui Zhu (朱耀辉) for finding this.
++
++CNVD-C-2026-590208 applies.
++
++Summary
++
++zone_status() (src/dnssec.c:1867 in the 2.93 release; the same
++construct is in current git master, 2.93-29-gad92083) computes
++&name[name_start-2] in its backtrack loop without checking that
++name_start >= 2. When name_start == 1 the loop starts at name[-1]
++and dereferences it immediately; the guard (p != name) can never
++fire for p < name, so the scan walks backwards through the heap
++until it finds a '.' byte or hits an unmapped page. Under ASAN this
++is a deterministic heap-buffer-overflow READ; on a plain build the
++process dies with SIGSEGV.
++
++A single, ordinary query plus one crafted upstream reply is enough.
++My reproducer starts the ASAN binary with --dnssec and the root
++trust anchor, with a mock upstream; on the first query the mock
++answers with a captured crafted reply (a response carrying RRSIG(46),
++NSEC(47) with an empty/root owner name, and NSEC3(50) records in the
++authority section) and the process crashes on the first query.
++---
++ src/dnssec.c | 2 +-
++ 1 files changed, 1 insertion(+), 1 deletion(-)
++
++--- a/src/dnssec.c
+++++ b/src/dnssec.c
++@@ -1927,7 +1927,7 @@ static int zone_status(char *name, int c
++ 	    return STAT_INSECURE;
++ 	}
++ 
++-      if (name_start == 0)
+++      if (name_start <= 1)
++ 	break;
++ 
++       for (p = &name[name_start-2]; (*p != '.') && (p != name); p--);
+diff --git a/package/network/services/dnsmasq/patches/004-Fix-subdomain-test-in-find_soa.patch b/package/network/services/dnsmasq/patches/004-Fix-subdomain-test-in-find_soa.patch
+new file mode 100644
+index 0000000..23d291c
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/004-Fix-subdomain-test-in-find_soa.patch
+@@ -0,0 +1,25 @@
++From 7719737f3687a2e8e98d8ede31e4f1a006f2deea Mon Sep 17 00:00:00 2001
++From: Simon Kelley <simon@thekelleys.org.uk>
++Date: Fri, 16 Oct 2026 15:22:23 +0100
++Subject: [PATCH] Fix subdomain-test in find_soa()
++
++Do correct subdomain test, rather than a substring match.
++
++Thanks to Lucas Celant <lcelant@redhat.com> for spotting this.
++
++CVE-2026-93008 may apply.
++---
++ src/rfc1035.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++--- a/src/rfc1035.c
+++++ b/src/rfc1035.c
++@@ -560,7 +560,7 @@ static int find_soa(struct dns_header *h
++ 	  soa_len = strlen(daemon->workspacename);
++ 
++ 	  /* SOA must be for the name we're interested in. */
++-	  if (soa_len <= name_len && memcmp(daemon->workspacename, name + name_len - soa_len, soa_len) == 0)
+++	  if (hostname_issubdomain(daemon->workspacename, name) != 0)
++ 	    {
++ 	      int prefix = name_len - soa_len;
++ 	      
+diff --git a/package/network/services/dnsmasq/patches/005-Improve-resistance-to-many-simultaneous-TCP-connecti.patch b/package/network/services/dnsmasq/patches/005-Improve-resistance-to-many-simultaneous-TCP-connecti.patch
+new file mode 100644
+index 0000000..0fdc166
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/005-Improve-resistance-to-many-simultaneous-TCP-connecti.patch
+@@ -0,0 +1,152 @@
++From 11493fe2186f837aeda74e8bf7fae8b92773a498 Mon Sep 17 00:00:00 2001
++From: Simon Kelley <simon@thekelleys.org.uk>
++Date: Fri, 16 Oct 2026 20:58:00 +0100
++Subject: [PATCH] Improve resistance to many simultaneous TCP connections.
++
++Dnsmasq limits the number of simultaneous TCP connections,
++to avoid resource-exhaustion attacks. Once the limit if reached,
++dnsmasq stops accepting TCP connections from the kernel.
++
++When doing dnssec validation, the same resources are used to
++handle internally generated queries with large answers
++needed to validate incoming queries which can still arrive via UDP.
++If a dnsmasq daemon has reached the limit on incoming
++TCP connections then these queries will fail to validate needlessly.
++
++Bump the number of TCP-process resources by 50% when dnssec validation
++is enabled, and reserve the extra 50% only for internally-generated
++dnssec validation queries. This allows validation to continue even
++when dnsmasq is ignoring new TCP requests.
++
++Thanks to Lucas Celant <lcelant@redhat.com> for spotting this.
++
++CVE-2026-93007 may apply.
++---
++ src/dnsmasq.c | 33 ++++++++++++++++++++++++---------
++ src/dnsmasq.h |  3 ++-
++ 2 files changed, 26 insertions(+), 10 deletions(-)
++
++--- a/src/dnsmasq.c
+++++ b/src/dnsmasq.c
++@@ -140,6 +140,9 @@ int main (int argc, char **argv)
++       /* one char flag per possible RR in answer section (may get extended). */
++       daemon->rr_status_sz = 64;
++       daemon->rr_status = safe_malloc(sizeof(*daemon->rr_status) * daemon->rr_status_sz);
+++      /* Increase TCP process slots by half, and reserve the extra for validation-to-tcp use only. */
+++      daemon->dnssec_tcp_slot_reserved = daemon->max_procs/2;
+++      daemon->max_procs += daemon->dnssec_tcp_slot_reserved;
++     }
++ #endif
++   
++@@ -427,7 +430,8 @@ int main (int argc, char **argv)
++ 
++       daemon->tcp_pids = safe_malloc(daemon->max_procs*sizeof(pid_t));
++       daemon->tcp_pipes = safe_malloc(daemon->max_procs*sizeof(int));
++-
+++      daemon->tcp_type = safe_malloc(daemon->max_procs);
+++      
++       for (i = 0; i < daemon->max_procs; i++)
++ 	daemon->tcp_pipes[i] = -1;
++     }
++@@ -1652,7 +1656,11 @@ static void async_event(int pipe, time_t
++ 		  
++ 		  /* tcp_pipes == -1 && tcp_pids == 0 required to free slot */
++ 		  if (daemon->tcp_pipes[i] == -1)
++-		    daemon->metrics[METRIC_TCP_CONNECTIONS]--;
+++		    {
+++		      if (daemon->tcp_type[i])
+++			 daemon->dnssec_tcp_slot_reserved++;
+++		      daemon->metrics[METRIC_TCP_CONNECTIONS]--;
+++		    }
++ 		}
++ 	break;
++ 	
++@@ -1888,7 +1896,7 @@ static void set_dns_listeners(void)
++   struct serverfd *serverfdp;
++   struct listener *listener;
++   struct randfd_list *rfl;
++-  int i;
+++  int i, j;
++   
++   for (serverfdp = daemon->sfds; serverfdp; serverfdp = serverfdp->next)
++     poll_listen(serverfdp->fd, POLLIN);
++@@ -1902,8 +1910,8 @@ static void set_dns_listeners(void)
++     poll_listen(rfl->rfd->fd, POLLIN);
++   
++   /* check to see if we have free tcp process slots. */
++-  for (i = daemon->max_procs - 1; i >= 0; i--)
++-    if (daemon->tcp_pids[i] == 0 && daemon->tcp_pipes[i] == -1)
+++  for (j = 0, i = daemon->max_procs - 1; i >= 0; i--)
+++    if (daemon->tcp_pids[i] == 0 && daemon->tcp_pipes[i] == -1 && ++j > daemon->dnssec_tcp_slot_reserved)
++       break;
++ 
++   for (listener = daemon->listeners; listener; listener = listener->next)
++@@ -1930,7 +1938,7 @@ static void check_dns_listeners(time_t n
++   struct serverfd *serverfdp;
++   struct listener *listener;
++   struct randfd_list *rfl;
++-  int i;
+++  int i, j;
++   
++   /* Note that handling events here can create or destroy fds and
++      render the result of the last poll() call invalid. Once
++@@ -1955,7 +1963,11 @@ static void check_dns_listeners(time_t n
++ 	      daemon->tcp_pipes[i] = -1;	
++ 	      /* tcp_pipes == -1 && tcp_pids == 0 required to free slot */
++ 	      if (daemon->tcp_pids[i] == 0)
++-		daemon->metrics[METRIC_TCP_CONNECTIONS]--;
+++		{
+++		  daemon->metrics[METRIC_TCP_CONNECTIONS]--;
+++		  if (daemon->tcp_type[i])
+++		    daemon->dnssec_tcp_slot_reserved++;
+++		}
++ 	    }
++ 	  return;
++ 	}
++@@ -1995,8 +2007,8 @@ static void check_dns_listeners(time_t n
++      at least one a poll() time, that we still do.
++      There may be more waiting connections after
++      poll() returns then free process slots. */
++-  for (i = daemon->max_procs - 1; i >= 0; i--)
++-    if (daemon->tcp_pids[i] == 0 && daemon->tcp_pipes[i] == -1)
+++  for (j = 0,i = daemon->max_procs - 1; i >= 0; i--)
+++    if (daemon->tcp_pids[i] == 0 && daemon->tcp_pipes[i] == -1 && ++j > daemon->dnssec_tcp_slot_reserved)
++       break;
++ 
++   if (i >= 0)
++@@ -2159,6 +2171,7 @@ static void do_tcp_connection(struct lis
++ 
++ 	  daemon->tcp_pids[slot] = p;
++ 	  daemon->tcp_pipes[slot] = pipefd[0];
+++	  daemon->tcp_type[slot] = 0;
++ 	  daemon->metrics[METRIC_TCP_CONNECTIONS]++;
++ 	  if (daemon->metrics[METRIC_TCP_CONNECTIONS] > daemon->max_procs_used)
++ 	    daemon->max_procs_used = daemon->metrics[METRIC_TCP_CONNECTIONS];
++@@ -2280,6 +2293,8 @@ int swap_to_tcp(struct frec *forward, ti
++ 	  /* i holds index of free slot */
++ 	  daemon->tcp_pids[i] = p;
++ 	  daemon->tcp_pipes[i] = pipefd[0];
+++	  daemon->tcp_type[i] = 1;
+++	  daemon->dnssec_tcp_slot_reserved--;
++ 	  daemon->metrics[METRIC_TCP_CONNECTIONS]++;
++ 	  if (daemon->metrics[METRIC_TCP_CONNECTIONS] > daemon->max_procs_used)
++ 	    daemon->max_procs_used = daemon->metrics[METRIC_TCP_CONNECTIONS];
++--- a/src/dnsmasq.h
+++++ b/src/dnsmasq.h
++@@ -1295,6 +1295,7 @@ extern struct daemon {
++   int    fd_save;          /*      "        "        */
++   pid_t *tcp_pids;
++   int *tcp_pipes;
+++  char *tcp_type;
++   int pipe_to_parent;
++   int numrrand;
++   struct randfd *randomsocks;
++@@ -1354,7 +1355,7 @@ extern struct daemon {
++   /* file for packet dumps. */
++   int dumpfd;
++ #endif
++-  int max_procs;
+++  int max_procs, dnssec_tcp_slot_reserved;
++   uint max_procs_used;
++ } *daemon;
++ 
+diff --git a/package/network/services/dnsmasq/patches/006-Fix-logic-error-in-TFTP-caching.patch b/package/network/services/dnsmasq/patches/006-Fix-logic-error-in-TFTP-caching.patch
+new file mode 100644
+index 0000000..0c3ae3a
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/006-Fix-logic-error-in-TFTP-caching.patch
+@@ -0,0 +1,31 @@
++From cdbfb972276ca3d07bec9246f57be8cd7c7d5478 Mon Sep 17 00:00:00 2001
++From: Simon Kelley <simon@thekelleys.org.uk>
++Date: Fri, 16 Oct 2026 22:33:51 +0100
++Subject: [PATCH] Fix logic error in TFTP caching.
++
++The TFTP subsystem prefetches data from disk. If a TFTP transfer
++is freed, and a new one allocated the same memory, then previously
++prefetched data could be wrongly supplied.
++
++Thanks to Lucas Celant <lcelant@redhat.com> for spotting this.
++
++CVE-2026-93006 may apply.
++---
++ src/tftp.c | 6 ++++++
++ 1 file changed, 6 insertions(+)
++
++--- a/src/tftp.c
+++++ b/src/tftp.c
++@@ -838,6 +838,12 @@ static void free_transfer(struct tftp_tr
++       close(transfer->file->fd);
++       free(transfer->file);
++     }
+++
+++  /* freeing this transfer and then allocating a new one
+++     may result in the same memory, but the contents of
+++     the transfer is no longer valid to cache. */
+++  if (daemon->srv_save == transfer)
+++    daemon->srv_save = NULL;
++   
++   free(transfer);
++ }
+diff --git a/package/network/services/dnsmasq/patches/007-Fix-off-by-one-bounds-check-in-DHCPv6-FQDN-option.patch b/package/network/services/dnsmasq/patches/007-Fix-off-by-one-bounds-check-in-DHCPv6-FQDN-option.patch
+new file mode 100644
+index 0000000..45cabf0
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/007-Fix-off-by-one-bounds-check-in-DHCPv6-FQDN-option.patch
+@@ -0,0 +1,23 @@
++From a627a7847ffa50eefedfe8cf842522a2c12e36c4 Mon Sep 17 00:00:00 2001
++From: Simon Kelley <simon@thekelleys.org.uk>
++Date: Fri, 16 Oct 2026 23:04:00 +0100
++Subject: [PATCH] Fix off-by-one bounds check in DHCPv6 FQDN option.
++
++Thanks to Lucas Celant <lcelant@redhat.com> for spotting this.
++
++CVE-2026-93009 may apply.
++---
++ src/rfc3315.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++--- a/src/rfc3315.c
+++++ b/src/rfc3315.c
++@@ -502,7 +502,7 @@ static int dhcp6_no_relay(struct state *
++  
++        state->fqdn_flags &= ~0x04;
++ 
++-       if (len != 0 && len < 255)
+++       if (len >= 1 && len < 255)
++ 	 {
++ 	   unsigned char *pp, *op = opt6_ptr(opt, 1);
++ 	   char *pq = daemon->dhcp_buff;
+diff --git a/package/network/services/dnsmasq/patches/008-Fix-DNS-name-buffer-overflow.patch b/package/network/services/dnsmasq/patches/008-Fix-DNS-name-buffer-overflow.patch
+new file mode 100644
+index 0000000..8500b8c
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/008-Fix-DNS-name-buffer-overflow.patch
+@@ -0,0 +1,84 @@
++From 145abca7f62a7744fb9aa742ac71e1c10af4cda7 Mon Sep 17 00:00:00 2001
++From: Simon Kelley <simon@thekelleys.org.uk>
++Date: Sat, 17 Oct 2026 01:05:16 +0100
++Subject: [PATCH] Fix DNS name buffer overflow.
++
++There are a couple of instances in the DNSSEC validation code where
++the code steps along a DNS name to remove some number if left-hand
++labels and replace them with * to make a wildcard. The name then
++gets passed to to_wire() to translate it in-place to the wire format.
++
++If external parameters dictate that all the labels are removed, and the name
++is of exactly the maximum size, then this causes to_wire() to overwrite the
++buffer by one byte.
++
++Having created the wildcard, move it to the start of the buffer to avoid
++this problem.
++
++Thanks to Lucas Celant <lcelant@redhat.com> for spotting this.
++
++CVE-2026-93011 may apply.
++---
++ src/dnssec.c | 21 ++++++++++++---------
++ 1 file changed, 12 insertions(+), 9 deletions(-)
++
++--- a/src/dnssec.c
+++++ b/src/dnssec.c
++@@ -486,7 +486,6 @@ static int validate_rrset(time_t now, st
++       int i, wire_len, sig_len;
++       const struct nettle_hash *hash;
++       void *ctx;
++-      char *name_start;
++       u32 nsigttl, ttl, orig_ttl;
++ 
++       failflags &= ~DNSSEC_FAIL_NOSIG;
++@@ -576,13 +575,13 @@ static int validate_rrset(time_t now, st
++ 	  if (!extract_name(header, plen, &p, name, EXTR_NAME_EXTRACT, 10)) 
++ 	    return STAT_BOGUS;
++ 
++-	  name_start = name;
++-	  
++ 	  /* if more labels than in RRsig name, hash *.<no labels in rrsig labels field>  4035 5.3.2 */
++ 	  /* If the name is already the wildcard, we're not going to change it. */
++ 	  if (labels < name_labels &&
++-	      !(name_labels - labels == 1 && name_start[0] == '*' && name_start[1] == '.'))
+++	      !(name_labels - labels == 1 && name[0] == '*' && name[1] == '.'))
++ 	    {
+++	      char *name_start = name;
+++
++ 	      for (j = name_labels - labels; j != 0; j--)
++ 		{
++ 		  while (*name_start != '.' && *name_start != 0)
++@@ -595,11 +594,13 @@ static int validate_rrset(time_t now, st
++ 		*wildcard_offset_out = name_start - name + 1;
++ 	      
++ 	      name_start--;
++-	      *name_start = '*';	      
+++	      *name_start = '*';
+++	      /* move our name to the start of the buffer to avoid pathalogical cases over-running the end in to_wire(). */
+++	      memmove(name, name_start, strlen(name_start) + 1);	      
++ 	    }
++-	  
++-	  wire_len = to_wire(name_start);
++-	  hash->update(ctx, (unsigned int)wire_len, (unsigned char *)name_start);
+++
+++	  wire_len = to_wire(name);
+++	  hash->update(ctx, (unsigned int)wire_len, (unsigned char *)name);
++ 	  hash->update(ctx, 4, p); /* class and type */
++ 	  hash->update(ctx, 4, (unsigned char *)&nsigttl);
++ 
++@@ -1687,11 +1688,13 @@ static int prove_non_existence_nsec3(str
++       
++       wildcard--;
++       *wildcard = '*';
+++      /* move our name to the start of the buffer to avoid pathalogical cases over-running the end in to_wire(). */
+++      memmove(name, wildcard, strlen(wildcard) + 1);
++       
++       if (dec_counter(validate_counter, NULL))
++ 	return DNSSEC_FAIL_WORK;
++       
++-      if ((digest_len = hash_name(wildcard, &digest, hash, salt, salt_len, iterations)) == 0)
+++      if ((digest_len = hash_name(name, &digest, hash, salt, salt_len, iterations)) == 0)
++ 	return DNSSEC_FAIL_NONSEC;
++       
++       if (!check_nsec3_coverage(header, plen, digest_len, digest, type, workspace1, workspace2, nsecs, nsec_count, NULL, 1))
+diff --git a/package/network/services/dnsmasq/patches/009-Fix-OOB-heap-write-in-blockdata_read.patch b/package/network/services/dnsmasq/patches/009-Fix-OOB-heap-write-in-blockdata_read.patch
+new file mode 100644
+index 0000000..8089b55
+--- /dev/null
++++ b/package/network/services/dnsmasq/patches/009-Fix-OOB-heap-write-in-blockdata_read.patch
+@@ -0,0 +1,157 @@
++From 738c0499881fdd046f4793ec99fdc945298cd152 Mon Sep 17 00:00:00 2001
++From: Simon Kelley <simon@thekelleys.org.uk>
++Date: Tue, 20 Oct 2026 23:19:11 +0100
++Subject: [PATCH] Fix OOB heap write in blockdata_read()
++
++A flaw in the blockdata_read() function allows an attacker to overflow
++heap buffers. If memory allocation fails whilst reading data from
++an IPC pipe, some data is left unread in the pipe. This has the effect of
++desynchronising further reads from the pipe and allows an attacker
++to overflow a heap buffer.
++
++Note that the attack depends on running the dnsmasq process out of memory
++so that calls to malloc() begin to fail. This is difficult to do on
++most platforms, unless a small ulimit is set on the size of the
++dnsmasq process. This makes practical attacks somewhat difficult.
++
++Thanks to Michel Belleau for finding and characterising this vulnerability.
++---
++ src/blockdata.c | 71 +++++++++++++++++++++++++++++++++----------------
++ src/cache.c     | 15 ++++++++---
++ 2 files changed, 60 insertions(+), 26 deletions(-)
++
++--- a/src/blockdata.c
+++++ b/src/blockdata.c
++@@ -16,7 +16,9 @@
++ 
++ #include "dnsmasq.h"
++ 
++-static struct blockdata *keyblock_free;
+++static struct blockdata *new_block(void);
+++
+++static struct blockdata *keyblock_free, *fallback;
++ static unsigned int blockdata_count, blockdata_hwm, blockdata_alloced;
++ 
++ static void add_blocks(int n)
++@@ -48,7 +50,11 @@ void blockdata_init(void)
++   /* Note that daemon->cachesize is enforced to have non-zero size if OPT_DNSSEC_VALID is set */  
++   if (option_bool(OPT_DNSSEC_VALID))
++     add_blocks(daemon->cachesize);
++-}
+++
+++  /* make sure we have one block to fall back on. */
+++  if (!(fallback = new_block()))
+++    die(_("Blockdata init: no memory"), NULL, EC_MISC);
+++ }
++ 
++ void blockdata_report(void)
++ {
++@@ -84,36 +90,47 @@ static struct blockdata *blockdata_alloc
++   struct blockdata *block, *ret = NULL;
++   struct blockdata **prev = &ret;
++   size_t blen;
++-
++-  do
+++  int fail;
+++  
+++  for (fail = 0; len != 0; len -= blen)
++     {
++-      if (!(block = new_block()))
++-	{
++-	  /* failed to alloc, free partial chain */
++-	  blockdata_free(ret);
++-	  return NULL;
++-	}
+++       blen = len > KEYBLOCK_LEN ? KEYBLOCK_LEN : len;
++ 
++-      if ((blen = len > KEYBLOCK_LEN ? KEYBLOCK_LEN : len) > 0)
+++       if (!fail)
++ 	{
++-	  if (data)
+++	  if ((block = new_block()))
++ 	    {
++-	      memcpy(block->key, data, blen);
++-	      data += blen;
+++	      *prev = block;
+++	      prev = &block->next;
++ 	    }
++-	  else if (!read_write(fd, block->key, blen, RW_READ))
+++	  else
++ 	    {
++-	      /* failed read free partial chain */
++-	      blockdata_free(ret);
++-	      return NULL;
+++	      /* Failed to alloc, use the pre-allocated fall-back. 
+++		 This allows us to always read the specified amount of data from the fd. */
+++	      fail = 1;
+++	      block = fallback;
++ 	    }
++ 	}
++-      
++-      len -= blen;
++-      *prev = block;
++-      prev = &block->next;
++-    } while (len != 0);
++-  
+++
+++       if (data)
+++	 {
+++	   memcpy(block->key, data, blen);
+++	   data += blen;
+++	 }
+++       else if (!read_write(fd, block->key, blen, RW_READ))
+++	 {
+++	   fail = 1;
+++	   break;
+++	 }
+++    }
+++  
+++  if (fail)
+++    {
+++      /* failed, free partial chain */
+++      blockdata_free(ret);
+++      return NULL;
+++    }
+++
++   return ret;
++ }
++ 
++@@ -235,6 +252,14 @@ void blockdata_write(struct blockdata *b
++     }
++ }
++ 
+++/* NOTE: this can fail (NULL return) for three possible reasons.
+++   1) len == 0 - trivial
+++   2) end of stream. 
+++   3) malloc failure when allocating blocks.
+++
+++   Unless EOF is encountered, len octets will always be read from the stream,
+++   even in memory allocation fails.
+++*/
++ struct blockdata *blockdata_read(int fd, size_t len)
++ {
++   return blockdata_alloc_real(fd, NULL, len);
++--- a/src/cache.c
+++++ b/src/cache.c
++@@ -1039,9 +1039,18 @@ int cache_recv_insert(time_t now, int fd
++ 		unsigned short class = C_IN;
++ 		struct blockdata *block = NULL;
++ 
++-		if ((flags & F_RR) && !(flags & F_NEG) && (flags & F_KEYTAG)
++-		    && !(block = addr.rrblock.rrdata = blockdata_read(fd, addr.rrblock.datalen)))
++-		  continue;
+++		/* Note that blockdata_read() can return NULL either
+++		   because the stream ended, OR memory allocation failed.
+++		   We continue here rather than returning 0 to finish draining 
+++		   the pipe in the second case. If the stream ended, the read
+++		   of the next length at the top of the loop will fail
+++		   and we'll return 0 there. */
+++		if (flags & F_RR)
+++		  {
+++		    if (!(flags & F_NEG) && (flags & F_KEYTAG) &&
+++			!(block = addr.rrblock.rrdata = blockdata_read(fd, addr.rrblock.datalen)))
+++		      continue;
+++		  }
++ #ifdef HAVE_DNSSEC
++ 		else if (flags & F_DNSKEY)
++ 		  {
+diff --git a/package/network/services/dnsmasq/patches/100-remove-old-runtime-kernel-support.patch b/package/network/services/dnsmasq/patches/100-remove-old-runtime-kernel-support.patch
+index c221343..42441b3 100644
+--- a/package/network/services/dnsmasq/patches/100-remove-old-runtime-kernel-support.patch
++++ b/package/network/services/dnsmasq/patches/100-remove-old-runtime-kernel-support.patch
+@@ -26,7 +26,7 @@ Signed-off-by: Kevin Darbyshire-Bryant <ldir@darbyshire-bryant.me.uk>
+  
+ --- a/src/dnsmasq.h
+ +++ b/src/dnsmasq.h
+-@@ -1310,7 +1310,7 @@ extern struct daemon {
++@@ -1311,7 +1311,7 @@ extern struct daemon {
+    int inotifyfd;
+  #endif
+  #if defined(HAVE_LINUX_NETWORK)
+@@ -35,7 +35,7 @@ Signed-off-by: Kevin Darbyshire-Bryant <ldir@darbyshire-bryant.me.uk>
+  #elif defined(HAVE_BSD_NETWORK)
+    int dhcp_raw_fd, dhcp_icmp_fd, routefd;
+  #endif
+-@@ -1544,9 +1544,6 @@ int read_writev(int fd, struct iovec *io
++@@ -1545,9 +1545,6 @@ int read_writev(int fd, struct iovec *io
+  void close_fds(long max_fd, int spare1, int spare2, int spare3);
+  int wildcard_match(const char* wildcard, const char* match);
+  int wildcard_matchn(const char* wildcard, const char* match, int num);
+diff --git a/package/network/services/dnsmasq/patches/200-ubus_dns.patch b/package/network/services/dnsmasq/patches/200-ubus_dns.patch
+index 5abc641..ff98568 100644
+--- a/package/network/services/dnsmasq/patches/200-ubus_dns.patch
++++ b/package/network/services/dnsmasq/patches/200-ubus_dns.patch
+@@ -1,6 +1,6 @@
+ --- a/src/dnsmasq.c
+ +++ b/src/dnsmasq.c
+-@@ -2184,6 +2184,10 @@ static void do_tcp_connection(struct lis
++@@ -2197,6 +2197,10 @@ static void do_tcp_connection(struct lis
+        daemon->pipe_to_parent = pipefd[1];
+      }
+  
+@@ -13,7 +13,7 @@
+       Reset that here. */
+ --- a/src/dnsmasq.h
+ +++ b/src/dnsmasq.h
+-@@ -1747,14 +1747,26 @@ void emit_dbus_signal(int action, struct
++@@ -1748,14 +1748,26 @@ void emit_dbus_signal(int action, struct
+  
+  /* ubus.c */
+  #ifdef HAVE_UBUS
+-- 
+2.56.0
+

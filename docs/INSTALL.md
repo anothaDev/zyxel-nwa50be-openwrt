@@ -122,6 +122,11 @@ are preserved across later sysupgrades. HTTPS remains reachable only from that
 host; SSH does too when an authorized key exists. Cleartext HTTP remains
 disabled. Use a static or DHCP-reserved administrator address; changing it
 requires another serial setup run.
+
+Open LuCI with the scheme typed out: `https://<AP address>/`. Browsers open a
+bare IP address over plain HTTP, and port 80 refuses connections, so the address
+alone ends in "refused to connect". The certificate is the self-signed one
+OpenWrt creates on first boot; expect a certificate warning on the first visit.
 The helper does not create SSIDs or enable radios. Configure those deliberately
 in LuCI and retain the driver's regulatory enforcement. Use 6 GHz LPI mode only
 where permitted and only in the indoor deployment conditions required locally.

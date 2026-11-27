@@ -1,0 +1,1223 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] dropbear: backport 2026.90 and 2026.91 security fixes
+SPDX-License-Identifier: GPL-2.0-only
+
+Carry OpenWrt 25.12 2218cb194946 and 6dead2869209 onto dropbear 2025.89:
+the -t forced-command bypass, non-blocking authorized_keys open,
+out-of-bounds close() fd, scp CVE-2019-6111 completion and CVE-2026-35385
+setuid/setgid clearing, plus the 2026.91 scp regression fixes.
+
+---
+ package/network/services/dropbear/Makefile                                                          |   2 +-
+ package/network/services/dropbear/patches/0001-Fix-incorrect-index-closing-listeners.patch          |  25 +++++
+ package/network/services/dropbear/patches/0002-scp-clear-setuid-setgid-bits-on-received-files.patch |  37 +++++++
+ package/network/services/dropbear/patches/0003-scp-Disallow-r-to-an-existing-directory.patch        |  39 +++++++
+ package/network/services/dropbear/patches/0004-scp-more-CVE-2019-6111-fix.patch                     | 360 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/network/services/dropbear/patches/0005-server-open-authorized_keys-files-nonblocking.patch  |  34 ++++++
+ package/network/services/dropbear/patches/0006-Rework-pubkey_options-struct.patch                   | 537 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/network/services/dropbear/patches/0007-scp-don-t-use-reallocarray.patch                     |  29 +++++
+ package/network/services/dropbear/patches/0008-scp-fix-recursive-overwrite-check.patch              |  38 +++++++
+ package/network/services/dropbear/patches/100-pubkey_path.patch                                     |   6 +-
+ 10 files changed, 1103 insertions(+), 4 deletions(-)
+ create mode 100644 package/network/services/dropbear/patches/0001-Fix-incorrect-index-closing-listeners.patch
+ create mode 100644 package/network/services/dropbear/patches/0002-scp-clear-setuid-setgid-bits-on-received-files.patch
+ create mode 100644 package/network/services/dropbear/patches/0003-scp-Disallow-r-to-an-existing-directory.patch
+ create mode 100644 package/network/services/dropbear/patches/0004-scp-more-CVE-2019-6111-fix.patch
+ create mode 100644 package/network/services/dropbear/patches/0005-server-open-authorized_keys-files-nonblocking.patch
+ create mode 100644 package/network/services/dropbear/patches/0006-Rework-pubkey_options-struct.patch
+ create mode 100644 package/network/services/dropbear/patches/0007-scp-don-t-use-reallocarray.patch
+ create mode 100644 package/network/services/dropbear/patches/0008-scp-fix-recursive-overwrite-check.patch
+
+diff --git a/package/network/services/dropbear/Makefile b/package/network/services/dropbear/Makefile
+index 457f099..0ada2ed 100644
+--- a/package/network/services/dropbear/Makefile
++++ b/package/network/services/dropbear/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=dropbear
+ PKG_VERSION:=2025.89
+-PKG_RELEASE:=1
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+ PKG_SOURCE_URL:= \
+diff --git a/package/network/services/dropbear/patches/0001-Fix-incorrect-index-closing-listeners.patch b/package/network/services/dropbear/patches/0001-Fix-incorrect-index-closing-listeners.patch
+new file mode 100644
+index 0000000..14eee0d
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0001-Fix-incorrect-index-closing-listeners.patch
+@@ -0,0 +1,25 @@
++From 91f4832c0a90fc2c2236465e2937dfbfea03c86d Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Wed, 8 Apr 2026 20:51:47 +0800
++Subject: [PATCH 1/6] Fix incorrect index closing listeners
++
++This could read beyond socks[] and close an arbitrary descriptor.
++The codepath runs when creating TCP listeners for forwarding (client or
++server).
++
++(cherry picked from commit 067fd3846c425d1998c7c94d3feafe1f26b514eb)
++---
++ src/listener.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++--- a/src/listener.c
+++++ b/src/listener.c
++@@ -95,7 +95,7 @@ struct Listener* new_listener(const int
++ 		if (ses.listensize > MAX_LISTENERS) {
++ 			TRACE(("leave newlistener: too many already"))
++ 			for (j = 0; j < nsocks; j++) {
++-				close(socks[i]);
+++				close(socks[j]);
++ 			}
++ 			return NULL;
++ 		}
+diff --git a/package/network/services/dropbear/patches/0002-scp-clear-setuid-setgid-bits-on-received-files.patch b/package/network/services/dropbear/patches/0002-scp-clear-setuid-setgid-bits-on-received-files.patch
+new file mode 100644
+index 0000000..d283194
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0002-scp-clear-setuid-setgid-bits-on-received-files.patch
+@@ -0,0 +1,37 @@
++From a89c4ce57a0e2d9c06c1ec08f1ac0ea1e0133c0c Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Sat, 2 May 2026 08:17:25 +0800
++Subject: [PATCH 2/6] scp: clear setuid/setgid bits on received files
++
++From openssh-portable 487e8ac146f7d6616f65c125d5edb210519b833a
++Tracked as CVE-2026-35385
++
++upstream: when downloading files as root in legacy (-O) mode and
++
++without the -p (preserve modes) flag set, clear setuid/setgid bits from
++downloaded files as one might expect.
++
++AFAIK this bug dates back to the original Berkeley rcp program.
++
++Reported by Christos Papakonstantinou of Cantina and Spearbit.
++
++OpenBSD-Commit-ID: 49e902fca8dd933a92a9b547ab31f63e86729fa1
++(cherry picked from commit 443ccc1fd1b9a4e3747f6b5cd644b7af49064308)
++---
++ src/scp.c | 4 +++-
++ 1 file changed, 3 insertions(+), 1 deletion(-)
++
++--- a/src/scp.c
+++++ b/src/scp.c
++@@ -850,8 +850,10 @@ sink(int argc, char **argv, const char *
++ 
++ 	setimes = targisdir = 0;
++ 	mask = umask(0);
++-	if (!pflag)
+++	if (!pflag) {
+++		mask |= 07000;
++ 		(void) umask(mask);
+++	}
++ 	if (argc != 1) {
++ 		run_err("ambiguous target");
++ 		exit(1);
+diff --git a/package/network/services/dropbear/patches/0003-scp-Disallow-r-to-an-existing-directory.patch b/package/network/services/dropbear/patches/0003-scp-Disallow-r-to-an-existing-directory.patch
+new file mode 100644
+index 0000000..4aab00e
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0003-scp-Disallow-r-to-an-existing-directory.patch
+@@ -0,0 +1,39 @@
++From d05b4fc2f7130630b8715d2b7244f090a3e679a5 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Sat, 2 May 2026 08:43:26 +0800
++Subject: [PATCH 3/6] scp: Disallow -r to an existing directory
++
++Checks of received paths don't catch all cases in -r recursive mode, so
++disallow -r when the destination directory exists. This mitigates
++CVE-2019-6111, where unexpected files would be accepted from a malicious
++scp server.
++
++Alternatives like rsync could be used in that case.
++
++The new error message may be misleading if parent path components of the
++destination are also missing, though the command would have failed
++regardless.
++
++(cherry picked from commit 61bd0e3e6573277de17359763aa5827a189c8d7f)
++---
++ src/scp.c | 9 +++++++++
++ 1 file changed, 9 insertions(+)
++
++--- a/src/scp.c
+++++ b/src/scp.c
++@@ -584,6 +584,15 @@ tolocal(int argc, char **argv)
++ 			if (*suser == '\0')
++ 				suser = NULL;
++ 		}
+++
+++		char *dest = *(argv + argc - 1);
+++		if (!(access(dest, F_OK) == 0 && errno == ENOENT)) {
+++			/* paths sent from the server in recursive mode aren't adequately
+++			 * checked that they match the requested files, so disallow this */
+++			fprintf(stderr, "-r destination \"%s\" must not already exist\n", dest);
+++			exit(1);
+++		}
+++
++ 		host = cleanhostname(host);
++ 		len = strlen(src) + CMDNEEDS + 20;
++ 		bp = xmalloc(len);
+diff --git a/package/network/services/dropbear/patches/0004-scp-more-CVE-2019-6111-fix.patch b/package/network/services/dropbear/patches/0004-scp-more-CVE-2019-6111-fix.patch
+new file mode 100644
+index 0000000..65f34e7
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0004-scp-more-CVE-2019-6111-fix.patch
+@@ -0,0 +1,360 @@
++From 7f15dd66d850a0a785b31c5e6ca1947e431fe4f9 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Mon, 20 Apr 2026 20:57:11 +0800
++Subject: [PATCH 4/6] scp: more CVE-2019-6111 fix
++
++Cherrypicked from OpenSSH portable
++
++commit 3d896c157c722bc47adca51a58dca859225b5874
++djm Sun Feb 10 11:15:52 2019 +0000
++
++upstream: when checking that filenames sent by the server side
++
++match what the client requested, be prepared to handle shell-style brace
++alternations, e.g. "{foo,bar}".
++
++"looks good to me" millert@ + in snaps for the last week courtesy
++deraadt@
++
++(cherry picked from commit 143291baca6ebb3407a0c25c85bd53bf041a6ab7)
++---
++ src/scp.c | 281 +++++++++++++++++++++++++++++++++++++++++++++++++++---
++ 1 file changed, 269 insertions(+), 12 deletions(-)
++
++--- a/src/scp.c
+++++ b/src/scp.c
++@@ -74,7 +74,6 @@
++  */
++ 
++ #include "includes.h"
++-/*RCSID("$OpenBSD: scp.c,v 1.130 2006/01/31 10:35:43 djm Exp $");*/
++ 
++ #include <fnmatch.h>
++ 
++@@ -609,6 +608,253 @@ tolocal(int argc, char **argv)
++ 	}
++ }
++ 
+++/* Appends a string to an array; returns 0 on success, -1 on alloc failure */
+++static int
+++append(char *cp, char ***ap, size_t *np)
+++{
+++	char **tmp;
+++
+++	if ((tmp = reallocarray(*ap, *np + 1, sizeof(*tmp))) == NULL)
+++		return -1;
+++	tmp[(*np)] = cp;
+++	(*np)++;
+++	*ap = tmp;
+++	return 0;
+++}
+++
+++/*
+++ * Finds the start and end of the first brace pair in the pattern.
+++ * returns 0 on success or -1 for invalid patterns.
+++ */
+++static int
+++find_brace(const char *pattern, int *startp, int *endp)
+++{
+++	int i;
+++	int in_bracket, brace_level;
+++
+++	*startp = *endp = -1;
+++	in_bracket = brace_level = 0;
+++	for (i = 0; i < INT_MAX && *endp < 0 && pattern[i] != '\0'; i++) {
+++		switch (pattern[i]) {
+++		case '\\':
+++			/* skip next character */
+++			if (pattern[i + 1] != '\0')
+++				i++;
+++			break;
+++		case '[':
+++			in_bracket = 1;
+++			break;
+++		case ']':
+++			in_bracket = 0;
+++			break;
+++		case '{':
+++			if (in_bracket)
+++				break;
+++			if (pattern[i + 1] == '}') {
+++				/* Protect a single {}, for find(1), like csh */
+++				i++; /* skip */
+++				break;
+++			}
+++			if (*startp == -1)
+++				*startp = i;
+++			brace_level++;
+++			break;
+++		case '}':
+++			if (in_bracket)
+++				break;
+++			if (*startp < 0) {
+++				/* Unbalanced brace */
+++				return -1;
+++			}
+++			if (--brace_level <= 0)
+++				*endp = i;
+++			break;
+++		}
+++	}
+++	/* unbalanced brackets/braces */
+++	if (*endp < 0 && (*startp >= 0 || in_bracket))
+++		return -1;
+++	return 0;
+++}
+++
+++/*
+++ * Assembles and records a successfully-expanded pattern, returns -1 on
+++ * alloc failure.
+++ */
+++static int
+++emit_expansion(const char *pattern, int brace_start, int brace_end,
+++    int sel_start, int sel_end, char ***patternsp, size_t *npatternsp)
+++{
+++	char *cp;
+++	int o = 0, tail_len = strlen(pattern + brace_end + 1);
+++
+++	if ((cp = malloc(brace_start + (sel_end - sel_start) +
+++	    tail_len + 1)) == NULL)
+++		return -1;
+++
+++	/* Pattern before initial brace */
+++	if (brace_start > 0) {
+++		memcpy(cp, pattern, brace_start);
+++		o = brace_start;
+++	}
+++	/* Current braced selection */
+++	if (sel_end - sel_start > 0) {
+++		memcpy(cp + o, pattern + sel_start,
+++		    sel_end - sel_start);
+++		o += sel_end - sel_start;
+++	}
+++	/* Remainder of pattern after closing brace */
+++	if (tail_len > 0) {
+++		memcpy(cp + o, pattern + brace_end + 1, tail_len);
+++		o += tail_len;
+++	}
+++	cp[o] = '\0';
+++	if (append(cp, patternsp, npatternsp) != 0) {
+++		free(cp);
+++		return -1;
+++	}
+++	return 0;
+++}
+++
+++/*
+++ * Expand the first encountered brace in pattern, appending the expanded
+++ * patterns it yielded to the *patternsp array.
+++ *
+++ * Returns 0 on success or -1 on allocation failure.
+++ *
+++ * Signals whether expansion was performed via *expanded and whether
+++ * pattern was invalid via *invalid.
+++ */
+++static int
+++brace_expand_one(const char *pattern, char ***patternsp, size_t *npatternsp,
+++    int *expanded, int *invalid)
+++{
+++	int i;
+++	int in_bracket, brace_start, brace_end, brace_level;
+++	int sel_start, sel_end;
+++
+++	*invalid = *expanded = 0;
+++
+++	if (find_brace(pattern, &brace_start, &brace_end) != 0) {
+++		*invalid = 1;
+++		return 0;
+++	} else if (brace_start == -1)
+++		return 0;
+++
+++	in_bracket = brace_level = 0;
+++	for (i = sel_start = brace_start + 1; i < brace_end; i++) {
+++		switch (pattern[i]) {
+++		case '{':
+++			if (in_bracket)
+++				break;
+++			brace_level++;
+++			break;
+++		case '}':
+++			if (in_bracket)
+++				break;
+++			brace_level--;
+++			break;
+++		case '[':
+++			in_bracket = 1;
+++			break;
+++		case ']':
+++			in_bracket = 0;
+++			break;
+++		case '\\':
+++			if (i < brace_end - 1)
+++				i++; /* skip */
+++			break;
+++		}
+++		if (pattern[i] == ',' || i == brace_end - 1) {
+++			if (in_bracket || brace_level > 0)
+++				continue;
+++			/* End of a selection, emit an expanded pattern */
+++
+++			/* Adjust end index for last selection */
+++			sel_end = (i == brace_end - 1) ? brace_end : i;
+++			if (emit_expansion(pattern, brace_start, brace_end,
+++			    sel_start, sel_end, patternsp, npatternsp) != 0)
+++				return -1;
+++			/* move on to the next selection */
+++			sel_start = i + 1;
+++			continue;
+++		}
+++	}
+++	if (in_bracket || brace_level > 0) {
+++		*invalid = 1;
+++		return 0;
+++	}
+++	/* success */
+++	*expanded = 1;
+++	return 0;
+++}
+++
+++/* Expand braces from pattern. Returns 0 on success, -1 on failure */
+++static int
+++brace_expand(const char *pattern, char ***patternsp, size_t *npatternsp)
+++{
+++	char *cp, *cp2, **active = NULL, **done = NULL;
+++	size_t i, nactive = 0, ndone = 0;
+++	int ret = -1, invalid = 0, expanded = 0;
+++
+++	*patternsp = NULL;
+++	*npatternsp = 0;
+++
+++	/* Start the worklist with the original pattern */
+++	if ((cp = strdup(pattern)) == NULL)
+++		return -1;
+++	if (append(cp, &active, &nactive) != 0) {
+++		free(cp);
+++		return -1;
+++	}
+++	while (nactive > 0) {
+++		cp = active[nactive - 1];
+++		nactive--;
+++		if (brace_expand_one(cp, &active, &nactive,
+++		    &expanded, &invalid) == -1) {
+++			free(cp);
+++			goto fail;
+++		}
+++		if (invalid)
+++			fatal("%s: invalid brace pattern \"%s\"", __func__, cp);
+++		if (expanded) {
+++			/*
+++			 * Current entry expanded to new entries on the
+++			 * active list; discard the progenitor pattern.
+++			 */
+++			free(cp);
+++			continue;
+++		}
+++		/*
+++		 * Pattern did not expand; append the finename component to
+++		 * the completed list
+++		 */
+++		if ((cp2 = strrchr(cp, '/')) != NULL)
+++			*cp2++ = '\0';
+++		else
+++			cp2 = cp;
+++		if (append(xstrdup(cp2), &done, &ndone) != 0) {
+++			free(cp);
+++			goto fail;
+++		}
+++		free(cp);
+++	}
+++	/* success */
+++	*patternsp = done;
+++	*npatternsp = ndone;
+++	done = NULL;
+++	ndone = 0;
+++	ret = 0;
+++ fail:
+++	for (i = 0; i < nactive; i++)
+++		free(active[i]);
+++	free(active);
+++	for (i = 0; i < ndone; i++)
+++		free(done[i]);
+++	free(done);
+++	return ret;
+++}
+++
++ void
++ source(int argc, char **argv)
++ {
++@@ -850,7 +1096,8 @@ sink(int argc, char **argv, const char *
++ 	off_t size, statbytes;
++ 	int setimes, targisdir, wrerrno = 0;
++ 	char ch, *cp, *np, *targ, *why, *vect[1], buf[2048];
++-	char *src_copy = NULL, *restrict_pattern = NULL;
+++	char **patterns = NULL;
+++	size_t n, npatterns = 0;
++ 	struct timeval tv[2];
++ 
++ #define	atime	tv[0]
++@@ -879,16 +1126,13 @@ sink(int argc, char **argv, const char *
++ 		 * Prepare to try to restrict incoming filenames to match
++ 		 * the requested destination file glob.
++ 		 */
++-		if ((src_copy = strdup(src)) == NULL)
++-			fatal("strdup failed");
++-		if ((restrict_pattern = strrchr(src_copy, '/')) != NULL) {
++-			*restrict_pattern++ = '\0';
++-		}
+++		if (brace_expand(src, &patterns, &npatterns) != 0)
+++			fatal("%s: could not expand pattern", __func__);
++ 	}
++ 	for (first = 1;; first = 0) {
++ 		cp = buf;
++ 		if (atomicio(read, remin, cp, 1) != 1)
++-			return;
+++			goto done;
++ 		if (*cp++ == '\n')
++ 			SCREWUP("unexpected <newline>");
++ 		do {
++@@ -911,7 +1155,7 @@ sink(int argc, char **argv, const char *
++ 		}
++ 		if (buf[0] == 'E') {
++ 			(void) atomicio(vwrite, remout, "", 1);
++-			return;
+++			goto done;
++ 		}
++ 		if (ch == '\n')
++ 			*--cp = 0;
++@@ -967,9 +1211,14 @@ sink(int argc, char **argv, const char *
++ 			run_err("error: unexpected filename: %s", cp);
++ 			exit(1);
++ 		}
++-		if (restrict_pattern != NULL &&
++-		    fnmatch(restrict_pattern, cp, 0) != 0)
++-			SCREWUP("filename does not match request");
+++		if (npatterns > 0) {
+++			for (n = 0; n < npatterns; n++) {
+++				if (fnmatch(patterns[n], cp, 0) == 0)
+++					break;
+++			}
+++			if (n >= npatterns)
+++				SCREWUP("filename does not match request");
+++		}
++ 		if (targisdir) {
++ 			static char *namebuf = NULL;
++ 			static size_t cursize = 0;
++@@ -1134,7 +1383,15 @@ bad:			run_err("%s: %s", np, strerror(er
++ 			break;
++ 		}
++ 	}
+++done:
+++	for (n = 0; n < npatterns; n++)
+++		free(patterns[n]);
+++	free(patterns);
+++	return;
++ screwup:
+++	for (n = 0; n < npatterns; n++)
+++		free(patterns[n]);
+++	free(patterns);
++ 	run_err("protocol error: %s", why);
++ 	exit(1);
++ }
+diff --git a/package/network/services/dropbear/patches/0005-server-open-authorized_keys-files-nonblocking.patch b/package/network/services/dropbear/patches/0005-server-open-authorized_keys-files-nonblocking.patch
+new file mode 100644
+index 0000000..c8d553c
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0005-server-open-authorized_keys-files-nonblocking.patch
+@@ -0,0 +1,34 @@
++From ff819590e3d945320faae956343d0a57e3525a02 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Fri, 17 Apr 2026 21:24:08 +0800
++Subject: [PATCH 5/6] server: open authorized_keys files nonblocking
++
++This avoids getting stuck with special files.
++
++(cherry picked from commit 8b579571b5584847caf72345b9073b3b2a0467a7)
++---
++ src/svr-authpubkey.c | 10 +++++++++-
++ 1 file changed, 9 insertions(+), 1 deletion(-)
++
++--- a/src/svr-authpubkey.c
+++++ b/src/svr-authpubkey.c
++@@ -482,10 +482,18 @@ static int checkpubkey(const char* keyal
++ 	if (checkpubkeyperms() == DROPBEAR_FAILURE) {
++ 		TRACE(("bad authorized_keys permissions, or file doesn't exist"))
++ 	} else {
+++		int fd;
++ 		/* we don't need to check pw and pw_dir for validity, since
++ 		 * its been done in checkpubkeyperms. */
++ 		filename = authorized_keys_filepath();
++-		authfile = fopen(filename, "r");
+++		fd = open(filename, O_RDONLY | O_NONBLOCK);
+++		if (fd >= 0) {
+++			authfile = fdopen(fd, "r");
+++			if (!authfile) {
+++				/* fdopen could fail with ENOMEM */
+++				m_close(fd);
+++			}
+++		}
++ 		if (!authfile) {
++ 			TRACE(("checkpubkey: failed opening %s: %s", filename, strerror(errno)))
++ 		}
+diff --git a/package/network/services/dropbear/patches/0006-Rework-pubkey_options-struct.patch b/package/network/services/dropbear/patches/0006-Rework-pubkey_options-struct.patch
+new file mode 100644
+index 0000000..fdbe9ea
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0006-Rework-pubkey_options-struct.patch
+@@ -0,0 +1,537 @@
++From d48f79c851110eb673d9738a69a15696ee972767 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Thu, 26 Mar 2026 23:03:46 +0800
++Subject: [PATCH 6/6] Rework pubkey_options struct
++
++Pubkey info is now included in the restriction struct. A temporary
++pubkey_options is filled then set in the global session after auth.
++
++(cherry picked from commit c60db6408178aaca0a8aacd017ac344a2cfb30c8)
++---
++ fuzz/fuzzer-pubkey.c        |  7 +---
++ src/auth.h                  | 28 ++++++++-----
++ src/fuzz.h                  |  2 +-
++ src/svr-authpubkey.c        | 78 ++++++++++++++++++++----------------
++ src/svr-authpubkeyoptions.c | 80 +++++++++++++++++++------------------
++ src/svr-chansession.c       |  5 ++-
++ src/svr-session.c           |  4 +-
++ src/sysoptions.h            |  4 ++
++ 8 files changed, 114 insertions(+), 94 deletions(-)
++
++--- a/fuzz/fuzzer-pubkey.c
+++++ b/fuzz/fuzzer-pubkey.c
++@@ -31,15 +31,10 @@ int LLVMFuzzerTestOneInput(const uint8_t
++ 			dropbear_exit("fuzzer imagined a bogus algorithm");
++ 		}
++ 
++-		int ret = fuzz_checkpubkey_line(line, 5, "/home/me/authorized_keys",
+++		fuzz_checkpubkey_line(line, 5, "/home/me/authorized_keys",
++ 			algoname, algolen,
++ 			keyblob->data, keyblob->len);
++ 
++-		if (ret == DROPBEAR_SUCCESS) {
++-			/* fuzz_checkpubkey_line() should have cleaned up for failure */
++-			svr_pubkey_options_cleanup();
++-		}
++-
++ 		buf_free(line);
++ 		buf_free(keyblob);
++ 		m_free(algoname);
++--- a/src/auth.h
+++++ b/src/auth.h
++@@ -44,6 +44,7 @@ void svr_switch_user(void);
++ void svr_raise_gid_utmp(void);
++ void svr_restore_gid(void);
++ 
+++struct PubKeyOptions;
++ #if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
++ int svr_pubkey_allows_agentfwd(void);
++ int svr_pubkey_allows_tcpfwd(void);
++@@ -52,8 +53,9 @@ int svr_pubkey_allows_pty(void);
++ int svr_pubkey_has_forced_command(void);
++ int svr_pubkey_allows_local_tcpfwd(const char *host, unsigned int port);
++ void svr_pubkey_set_forced_command(struct ChanSess *chansess);
++-void svr_pubkey_options_cleanup(void);
++-int svr_add_pubkey_options(buffer *options_buf, int line_num, const char* filename);
+++void svr_pubkey_options_cleanup(struct PubKeyOptions *pubkey_options);
+++struct PubKeyOptions*
+++svr_parse_pubkey_options(buffer *options_buf, int line_num, const char* filename);
++ #else
++ /* no option : success */
++ #define svr_pubkey_allows_agentfwd() 1
++@@ -64,9 +66,14 @@ int svr_add_pubkey_options(buffer *optio
++ static inline int svr_pubkey_allows_local_tcpfwd(const char *host, unsigned int port)
++ 	{ (void)host; (void)port; return 1; }
++ 
++-static inline void svr_pubkey_set_forced_command(struct ChanSess *chansess) { }
++-static inline void svr_pubkey_options_cleanup(void) { }
++-#define svr_add_pubkey_options(x,y,z) DROPBEAR_SUCCESS
+++static inline void svr_pubkey_set_forced_command(struct ChanSess *chansess) {
+++	(void)chansess;
+++}
+++static inline void svr_pubkey_options_cleanup(struct PubKeyOptions *pubkey_options) {
+++	(void)pubkey_options;
+++}
+++struct PubKeyOptions*
+++svr_parse_pubkey_options(buffer *options_buf, int line_num, const char* filename);
++ #endif
++ 
++ /* Client functions */
++@@ -134,14 +141,10 @@ struct AuthState {
++ 	char *pw_shell;
++ 	char *pw_name;
++ 	char *pw_passwd;
++-#if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
++ 	struct PubKeyOptions* pubkey_options;
++-	char *pubkey_info;
++-#endif
++ };
++ 
++ #if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
++-struct PubKeyOptions;
++ struct PubKeyOptions {
++ 	/* Flags */
++ 	int no_port_forwarding_flag;
++@@ -157,6 +160,13 @@ struct PubKeyOptions {
++ 	int no_touch_required_flag;
++ 	int verify_required_flag;
++ #endif
+++
+++	/* String from the end of authorized_keys entry, for SSH_PUBKEYINFO
+++	   environment variable. May be omitted (NULL) if
+++	   options contain non-shell-safe characters.
+++	   This is not involved in pubkey option restrictions, but is
+++	   parsed and kept similarly so is stored here. */
+++	char * info_env;
++ };
++ 
++ struct PermitTCPFwdEntry {
++--- a/src/fuzz.h
+++++ b/src/fuzz.h
++@@ -30,7 +30,7 @@ const void* fuzz_get_algo(const algo_typ
++ 
++ // fuzzer functions that intrude into general code
++ void fuzz_kex_fakealgos(void);
++-int fuzz_checkpubkey_line(buffer* line, int line_num, char* filename,
+++void fuzz_checkpubkey_line(buffer* line, int line_num, char* filename,
++         const char* algo, unsigned int algolen,
++         const unsigned char* keyblob, unsigned int keybloblen);
++ extern const char * const * fuzz_signkey_names;
++--- a/src/svr-authpubkey.c
+++++ b/src/svr-authpubkey.c
++@@ -73,7 +73,8 @@
++ 
++ static char * authorized_keys_filepath(void);
++ static int checkpubkey(const char* keyalgo, unsigned int keyalgolen,
++-		const unsigned char* keyblob, unsigned int keybloblen);
+++		const unsigned char* keyblob, unsigned int keybloblen,
+++		struct PubKeyOptions **ret_options);
++ static int checkpubkeyperms(void);
++ static void send_msg_userauth_pk_ok(const char* sigalgo, unsigned int sigalgolen,
++ 		const unsigned char* keyblob, unsigned int keybloblen);
++@@ -96,7 +97,8 @@ void svr_auth_pubkey(int valid_user) {
++ 	char* fp = NULL;
++ 	enum signature_type sigtype;
++ 	enum signkey_type keytype;
++-    int auth_failure = 1;
+++	int auth_failure = 1;
+++	struct PubKeyOptions *pubkey_options = NULL;
++ 
++ 	TRACE(("enter pubkeyauth"))
++ 
++@@ -149,8 +151,8 @@ void svr_auth_pubkey(int valid_user) {
++                         .pos = 0,
++                         .size = 0
++                     };
++-                    int ret = svr_add_pubkey_options(&temp_buf, 0, "N/A");
++-                    if (ret == DROPBEAR_FAILURE) {
+++                    pubkey_options = svr_parse_pubkey_options(&temp_buf, 0, "plugin");
+++                    if (pubkey_options == NULL) {
++                         /* Fail immediately as the plugin provided wrong options */
++                         send_msg_userauth_failure(0, 0);
++                         goto out;
++@@ -161,7 +163,8 @@ void svr_auth_pubkey(int valid_user) {
++ #endif
++ 	/* check if the key is valid */
++         if (auth_failure) {
++-            auth_failure = checkpubkey(keyalgo, keyalgolen, keyblob, keybloblen) == DROPBEAR_FAILURE;
+++		int status = checkpubkey(keyalgo, keyalgolen, keyblob, keybloblen, &pubkey_options);
+++		auth_failure = (status != DROPBEAR_SUCCESS);
++         }
++ 
++         if (auth_failure) {
++@@ -187,13 +190,13 @@ void svr_auth_pubkey(int valid_user) {
++ #if DROPBEAR_SK_ECDSA || DROPBEAR_SK_ED25519
++ 	key->sk_flags_mask = SSH_SK_USER_PRESENCE_REQD;
++ #if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
++-	if (ses.authstate.pubkey_options && ses.authstate.pubkey_options->no_touch_required_flag) {
+++	if (pubkey_options->no_touch_required_flag) {
++ 		key->sk_flags_mask &= ~SSH_SK_USER_PRESENCE_REQD;
++ 	}
++-	if (ses.authstate.pubkey_options && ses.authstate.pubkey_options->verify_required_flag) {
+++	if (pubkey_options->verify_required_flag) {
++ 		key->sk_flags_mask |= SSH_SK_USER_VERIFICATION_REQD;
++ 	}
++-#endif /* DROPBEAR_SVR_PUBKEY_OPTIONS */
+++#endif /* DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT */
++ #endif
++ 
++ 	/* create the data which has been signed - this a string containing
++@@ -215,6 +218,10 @@ void svr_auth_pubkey(int valid_user) {
++ 	/* ... and finally verify the signature */
++ 	fp = sign_key_fingerprint(keyblob, keybloblen);
++ 	if (buf_verify(ses.payload, key, sigtype, signbuf) == DROPBEAR_SUCCESS) {
+++		if (ses.authstate.pubkey_options == NULL) {
+++			ses.authstate.pubkey_options = pubkey_options;
+++			pubkey_options = NULL;
+++		}
++ 		if (svr_opts.multiauthmethod && (ses.authstate.authtypes & ~AUTH_TYPE_PUBKEY)) {
++ 			/* successful pubkey authentication, but extra auth required */
++ 			dropbear_log(LOG_NOTICE,
++@@ -259,9 +266,9 @@ out:
++ 		sign_key_free(key);
++ 		key = NULL;
++ 	}
++-	/* Retain pubkey options only if auth succeeded */
++-	if (!ses.authstate.authdone) {
++-		svr_pubkey_options_cleanup();
+++	if (pubkey_options) {
+++		svr_pubkey_options_cleanup(pubkey_options);
+++		pubkey_options = NULL;
++ 	}
++ 	TRACE(("leave pubkeyauth"))
++ }
++@@ -284,17 +291,22 @@ static void send_msg_userauth_pk_ok(cons
++ 
++ }
++ 
++-/* Content for SSH_PUBKEYINFO is optionally returned malloced in ret_info (will be
++-   freed if already set */
+++/* Key options are optionally returned in ret_options.
+++   Should be passed with *ret_options = NULL, will only be populated
+++   on success return. */
++ static int checkpubkey_line(buffer* line, int line_num, const char* filename,
++ 		const char* algo, unsigned int algolen,
++ 		const unsigned char* keyblob, unsigned int keybloblen,
++-		char ** ret_info) {
+++		struct PubKeyOptions ** ret_options) {
++ 	buffer *options_buf = NULL;
++ 	char *info_str = NULL;
++ 	unsigned int pos, len, infopos, infolen;
++ 	int ret = DROPBEAR_FAILURE;
++ 
+++	if (ret_options) {
+++		*ret_options = NULL;
+++	}
+++
++ 	if (line->len < MIN_AUTHKEYS_LINE || line->len > MAX_AUTHKEYS_LINE) {
++ 		TRACE(("checkpubkey_line: bad line length %d", line->len))
++ 		goto out;
++@@ -396,7 +408,7 @@ static int checkpubkey_line(buffer* line
++ 	if (infolen > 0) {
++ 		info_str = m_malloc(infolen + 1);
++ 		buf_setpos(line, infopos);
++-        strncpy(info_str, buf_getptr(line, infolen), infolen);
+++		strncpy(info_str, buf_getptr(line, infolen), infolen);
++ 	}
++ 
++ 	/* truncate to base64 data length */
++@@ -408,20 +420,19 @@ static int checkpubkey_line(buffer* line
++ 	ret = cmp_base64_key(keyblob, keybloblen, (const unsigned char *) algo, algolen, line, NULL);
++ 
++ 	/* free pubkey_info if it is filled */
++-	if (ret_info && *ret_info) {
++-		m_free(*ret_info);
++-		*ret_info = NULL;
++-	}
++-
++ 	if (ret == DROPBEAR_SUCCESS) {
++-		if (options_buf) {
++-			ret = svr_add_pubkey_options(options_buf, line_num, filename);
++-		}
++-		if (ret_info) {
+++#if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
+++		if (ret_options) {
+++			*ret_options = svr_parse_pubkey_options(options_buf, line_num, filename);
+++			if (*ret_options == NULL) {
+++				ret = DROPBEAR_FAILURE;
+++				goto out;
+++			}
++ 			/* take the (optional) public key information */
++-			*ret_info = info_str;
+++			(*ret_options)->info_env = info_str;
++ 			info_str = NULL;
++ 		}
+++#endif
++ 	}
++ 
++ out:
++@@ -457,7 +468,8 @@ static char *authorized_keys_filepath()
++  * acceptable key for authentication */
++ /* Returns DROPBEAR_SUCCESS if key is ok for auth, DROPBEAR_FAILURE otherwise */
++ static int checkpubkey(const char* keyalgo, unsigned int keyalgolen,
++-		const unsigned char* keyblob, unsigned int keybloblen) {
+++		const unsigned char* keyblob, unsigned int keybloblen,
+++		struct PubKeyOptions **ret_options) {
++ 
++ 	FILE * authfile = NULL;
++ 	char * filename = NULL;
++@@ -523,13 +535,7 @@ static int checkpubkey(const char* keyal
++ 		line_num++;
++ 
++ 		ret = checkpubkey_line(line, line_num, filename, keyalgo, keyalgolen,
++-			keyblob, keybloblen,
++-#if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
++-			&ses.authstate.pubkey_info
++-#else
++-			NULL
++-#endif
++-		);
+++			keyblob, keybloblen, ret_options);
++ 		if (ret == DROPBEAR_SUCCESS) {
++ 			break;
++ 		}
++@@ -623,10 +629,12 @@ static int checkfileperm(char * filename
++ }
++ 
++ #if DROPBEAR_FUZZ
++-int fuzz_checkpubkey_line(buffer* line, int line_num, char* filename,
+++void fuzz_checkpubkey_line(buffer* line, int line_num, char* filename,
++ 		const char* algo, unsigned int algolen,
++ 		const unsigned char* keyblob, unsigned int keybloblen) {
++-	return checkpubkey_line(line, line_num, filename, algo, algolen, keyblob, keybloblen, NULL);
+++	struct PubKeyOptions *options = NULL;
+++	checkpubkey_line(line, line_num, filename, algo, algolen, keyblob, keybloblen, &options);
+++	svr_pubkey_options_cleanup(options);
++ }
++ #endif
++ 
++--- a/src/svr-authpubkeyoptions.c
+++++ b/src/svr-authpubkeyoptions.c
++@@ -138,25 +138,21 @@ void svr_pubkey_set_forced_command(struc
++ }
++ 
++ /* Free potential public key options */
++-void svr_pubkey_options_cleanup() {
++-	if (ses.authstate.pubkey_options) {
++-		if (ses.authstate.pubkey_options->forced_command) {
++-			m_free(ses.authstate.pubkey_options->forced_command);
++-		}
++-		if (ses.authstate.pubkey_options->permit_open_destinations) {
++-			m_list_elem *iter = ses.authstate.pubkey_options->permit_open_destinations->first;
+++void svr_pubkey_options_cleanup(struct PubKeyOptions *pubkey_options) {
+++	if (pubkey_options) {
+++		m_free(pubkey_options->forced_command);
+++		if (pubkey_options->permit_open_destinations) {
+++			m_list_elem *iter = pubkey_options->permit_open_destinations->first;
++ 			while (iter) {
++ 				struct PermitTCPFwdEntry *entry = (struct PermitTCPFwdEntry*)list_remove(iter);
++ 				m_free(entry->host);
++ 				m_free(entry);
++-				iter = ses.authstate.pubkey_options->permit_open_destinations->first;
+++				iter = pubkey_options->permit_open_destinations->first;
++ 			}
++-			m_free(ses.authstate.pubkey_options->permit_open_destinations);
+++			m_free(pubkey_options->permit_open_destinations);
++ 		}
++-		m_free(ses.authstate.pubkey_options);
++-	}
++-	if (ses.authstate.pubkey_info) {
++-		m_free(ses.authstate.pubkey_info);
+++		m_free(pubkey_options->info_env);
+++		m_free(pubkey_options);
++ 	}
++ }
++ 
++@@ -174,58 +170,65 @@ static int match_option(buffer *options_
++ 	return DROPBEAR_FAILURE;
++ }
++ 
++-/* Parse pubkey options and set ses.authstate.pubkey_options accordingly.
++- * Returns DROPBEAR_SUCCESS if key is ok for auth, DROPBEAR_FAILURE otherwise */
++-int svr_add_pubkey_options(buffer *options_buf, int line_num, const char* filename) {
++-	int ret = DROPBEAR_FAILURE;
+++/* Parse pubkey options and return a malloced struct.
+++ * options_buf may be NULL, treated as empty.
+++ * Returns NULL on failure */
+++struct PubKeyOptions*
+++svr_parse_pubkey_options(buffer *options_buf, int line_num, const char* filename) {
+++	struct PubKeyOptions *pubkey_options = NULL;
++ 
++ 	TRACE(("enter addpubkeyoptions"))
++ 
++-	ses.authstate.pubkey_options = (struct PubKeyOptions*)m_malloc(sizeof( struct PubKeyOptions ));
+++	pubkey_options = (struct PubKeyOptions*)m_malloc(sizeof( struct PubKeyOptions ));
+++
+++	if (!options_buf) {
+++		TRACE(("leave addpubkeyoptions, null options"))
+++		return pubkey_options;
+++	}
++ 
++ 	buf_setpos(options_buf, 0);
++ 	while (options_buf->pos < options_buf->len) {
++ 		if (match_option(options_buf, "no-port-forwarding") == DROPBEAR_SUCCESS) {
++ 			dropbear_log(LOG_WARNING, "Port forwarding disabled.");
++-			ses.authstate.pubkey_options->no_port_forwarding_flag = 1;
+++			pubkey_options->no_port_forwarding_flag = 1;
++ 			goto next_option;
++ 		}
++ 		if (match_option(options_buf, "no-agent-forwarding") == DROPBEAR_SUCCESS) {
++ #if DROPBEAR_SVR_AGENTFWD
++ 			dropbear_log(LOG_WARNING, "Agent forwarding disabled.");
++-			ses.authstate.pubkey_options->no_agent_forwarding_flag = 1;
+++			pubkey_options->no_agent_forwarding_flag = 1;
++ #endif
++ 			goto next_option;
++ 		}
++ 		if (match_option(options_buf, "no-X11-forwarding") == DROPBEAR_SUCCESS) {
++ #if DROPBEAR_X11FWD
++ 			dropbear_log(LOG_WARNING, "X11 forwarding disabled.");
++-			ses.authstate.pubkey_options->no_x11_forwarding_flag = 1;
+++			pubkey_options->no_x11_forwarding_flag = 1;
++ #endif
++ 			goto next_option;
++ 		}
++ 		if (match_option(options_buf, "no-pty") == DROPBEAR_SUCCESS) {
++ 			dropbear_log(LOG_WARNING, "Pty allocation disabled.");
++-			ses.authstate.pubkey_options->no_pty_flag = 1;
+++			pubkey_options->no_pty_flag = 1;
++ 			goto next_option;
++ 		}
++ 		if (match_option(options_buf, "restrict") == DROPBEAR_SUCCESS) {
++ 			dropbear_log(LOG_WARNING, "Restrict option set");
++-			ses.authstate.pubkey_options->no_port_forwarding_flag = 1;
+++			pubkey_options->no_port_forwarding_flag = 1;
++ #if DROPBEAR_SVR_AGENTFWD
++-			ses.authstate.pubkey_options->no_agent_forwarding_flag = 1;
+++			pubkey_options->no_agent_forwarding_flag = 1;
++ #endif
++ #if DROPBEAR_X11FWD
++-			ses.authstate.pubkey_options->no_x11_forwarding_flag = 1;
+++			pubkey_options->no_x11_forwarding_flag = 1;
++ #endif
++-			ses.authstate.pubkey_options->no_pty_flag = 1;
+++			pubkey_options->no_pty_flag = 1;
++ 			goto next_option;
++ 		}
++ 		if (match_option(options_buf, "command=\"") == DROPBEAR_SUCCESS) {
++ 			int escaped = 0;
++ 			const unsigned char* command_start = buf_getptr(options_buf, 0);
++ 
++-			if (ses.authstate.pubkey_options->forced_command) {
+++			if (pubkey_options->forced_command) {
++ 				/* multiple command= options */
++ 				goto bad_option;
++ 			}
++@@ -234,10 +237,10 @@ int svr_add_pubkey_options(buffer *optio
++ 				const char c = buf_getbyte(options_buf);
++ 				if (!escaped && c == '"') {
++ 					const int command_len = buf_getptr(options_buf, 0) - command_start;
++-					ses.authstate.pubkey_options->forced_command = m_malloc(command_len);
++-					memcpy(ses.authstate.pubkey_options->forced_command,
+++					pubkey_options->forced_command = m_malloc(command_len);
+++					memcpy(pubkey_options->forced_command,
++ 							command_start, command_len-1);
++-					ses.authstate.pubkey_options->forced_command[command_len-1] = '\0';
+++					pubkey_options->forced_command[command_len-1] = '\0';
++ 					goto next_option;
++ 				}
++ 				escaped = (!escaped && c == '\\');
++@@ -250,8 +253,8 @@ int svr_add_pubkey_options(buffer *optio
++ 			int valid_option = 0;
++ 			const unsigned char* permitopen_start = buf_getptr(options_buf, 0);
++ 
++-			if (!ses.authstate.pubkey_options->permit_open_destinations) {
++-				ses.authstate.pubkey_options->permit_open_destinations = list_new();
+++			if (!pubkey_options->permit_open_destinations) {
+++				pubkey_options->permit_open_destinations = list_new();
++ 			}
++ 
++ 			while (options_buf->pos < options_buf->len) {
++@@ -263,7 +266,7 @@ int svr_add_pubkey_options(buffer *optio
++ 					struct PermitTCPFwdEntry *entry =
++ 							(struct PermitTCPFwdEntry*)m_malloc(sizeof(struct PermitTCPFwdEntry));
++ 
++-					list_append(ses.authstate.pubkey_options->permit_open_destinations, entry);
+++					list_append(pubkey_options->permit_open_destinations, entry);
++ 					spec = m_malloc(permitopen_len);
++ 					memcpy(spec, permitopen_start, permitopen_len - 1);
++ 					spec[permitopen_len - 1] = '\0';
++@@ -297,14 +300,14 @@ int svr_add_pubkey_options(buffer *optio
++ 		if (match_option(options_buf, "no-touch-required") == DROPBEAR_SUCCESS) {
++ #if DROPBEAR_SK_ECDSA || DROPBEAR_SK_ED25519
++ 			dropbear_log(LOG_WARNING, "No user presence check required for U2F/FIDO key.");
++-			ses.authstate.pubkey_options->no_touch_required_flag = 1;
+++			pubkey_options->no_touch_required_flag = 1;
++ #endif
++ 			goto next_option;
++ 		}
++ 		if (match_option(options_buf, "verify-required") == DROPBEAR_SUCCESS) {
++ #if DROPBEAR_SK_ECDSA || DROPBEAR_SK_ED25519
++ 			dropbear_log(LOG_WARNING, "User verification required for U2F/FIDO key.");
++-			ses.authstate.pubkey_options->verify_required_flag = 1;
+++			pubkey_options->verify_required_flag = 1;
++ #endif
++ 			goto next_option;
++ 		}
++@@ -321,17 +324,16 @@ next_option:
++ 		/* Process the next option. */
++ 	}
++ 	/* parsed all options with no problem */
++-	ret = DROPBEAR_SUCCESS;
++ 	goto end;
++ 
++ bad_option:
++-	ret = DROPBEAR_FAILURE;
++-	svr_pubkey_options_cleanup();
+++	svr_pubkey_options_cleanup(pubkey_options);
+++	pubkey_options = NULL;
++ 	dropbear_log(LOG_WARNING, "Bad public key options at %s:%d", filename, line_num);
++ 
++ end:
++ 	TRACE(("leave addpubkeyoptions"))
++-	return ret;
+++	return pubkey_options;
++ }
++ 
++ #endif
++--- a/src/svr-chansession.c
+++++ b/src/svr-chansession.c
++@@ -1026,8 +1026,9 @@ static void execchild(const void *user_d
++ 		addnewvar("SSH_ORIGINAL_COMMAND", chansess->original_command);
++ 	}
++ #if DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT
++-	if (ses.authstate.pubkey_info != NULL) {
++-		addnewvar("SSH_PUBKEYINFO", ses.authstate.pubkey_info);
+++	if (ses.authstate.pubkey_options
+++		&& ses.authstate.pubkey_options->info_env) {
+++		addnewvar("SSH_PUBKEYINFO", ses.authstate.pubkey_options->info_env);
++ 	}
++ #endif
++ 
++--- a/src/svr-session.c
+++++ b/src/svr-session.c
++@@ -84,8 +84,8 @@ static const struct ChanType *svr_chanty
++ 
++ static void
++ svr_session_cleanup(void) {
++-	/* free potential public key options */
++-	svr_pubkey_options_cleanup();
+++	svr_pubkey_options_cleanup(ses.authstate.pubkey_options);
+++	ses.authstate.pubkey_options = NULL;
++ 
++ 	m_free(svr_ses.addrstring);
++ 	m_free(svr_ses.remotehost);
++--- a/src/sysoptions.h
+++++ b/src/sysoptions.h
++@@ -347,6 +347,10 @@
++ 	#error "You must define DROPBEAR_SVR_PUBKEY_AUTH in order to use plugins"
++ #endif
++ 
+++#if (DROPBEAR_PLUGIN && !DROPBEAR_SVR_PUBKEY_OPTIONS_BUILT)
+++	#error "DROPBEAR_PLUGIN requires DROPBEAR_SVR_PUBKEY_OPTIONS"
+++#endif
+++
++ #if !(DROPBEAR_AES128 || DROPBEAR_3DES || DROPBEAR_AES256 || DROPBEAR_CHACHA20POLY1305)
++ 	#error "At least one encryption algorithm must be enabled. AES128 is recommended."
++ #endif
+diff --git a/package/network/services/dropbear/patches/0007-scp-don-t-use-reallocarray.patch b/package/network/services/dropbear/patches/0007-scp-don-t-use-reallocarray.patch
+new file mode 100644
+index 0000000..87c5e75
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0007-scp-don-t-use-reallocarray.patch
+@@ -0,0 +1,29 @@
++From 47d14bbfb7ff0e909e673357a64c3264a2a7fbaf Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Mon, 4 May 2026 21:35:57 +0800
++Subject: [PATCH 7/8] scp: don't use reallocarray
++
++reallocarray() isn't portable. An overflow check can be used instead.
++
++Fixes: 143291baca6e ("scp: more CVE-2019-6111 fix")
++(cherry picked from commit 0c5629a5d543ef5e4eff43345b1eedf2afef84ca)
++---
++ src/scp.c | 7 ++++++-
++ 1 file changed, 6 insertions(+), 1 deletion(-)
++
++--- a/src/scp.c
+++++ b/src/scp.c
++@@ -614,7 +614,12 @@ append(char *cp, char ***ap, size_t *np)
++ {
++ 	char **tmp;
++ 
++-	if ((tmp = reallocarray(*ap, *np + 1, sizeof(*tmp))) == NULL)
+++	if (*np + 1 > (SIZE_MAX / sizeof(*tmp))) {
+++		/* overflow */
+++		return -1;
+++	}
+++
+++	if ((tmp = realloc(*ap, (*np + 1) * sizeof(*tmp))) == NULL)
++ 		return -1;
++ 	tmp[(*np)] = cp;
++ 	(*np)++;
+diff --git a/package/network/services/dropbear/patches/0008-scp-fix-recursive-overwrite-check.patch b/package/network/services/dropbear/patches/0008-scp-fix-recursive-overwrite-check.patch
+new file mode 100644
+index 0000000..a6b77d7
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0008-scp-fix-recursive-overwrite-check.patch
+@@ -0,0 +1,38 @@
++From 984d412b4f8238e41b114c8ee70dbb91fd39d805 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Mon, 4 May 2026 21:36:41 +0800
++Subject: [PATCH 8/8] scp: fix recursive overwrite check
++
++Non-recursive transfers were incorrectly disallowed to an existing
++destination.
++
++In addition, the destination check logic was wrong.
++
++Fixes: 61bd0e3e6573 ("scp: Disallow -r to an existing directory")
++(cherry picked from commit 16ce059ed8e914e210af67e199041943ec747034)
++---
++ src/scp.c | 13 ++++++++-----
++ 1 file changed, 8 insertions(+), 5 deletions(-)
++
++--- a/src/scp.c
+++++ b/src/scp.c
++@@ -585,11 +585,14 @@ tolocal(int argc, char **argv)
++ 		}
++ 
++ 		char *dest = *(argv + argc - 1);
++-		if (!(access(dest, F_OK) == 0 && errno == ENOENT)) {
++-			/* paths sent from the server in recursive mode aren't adequately
++-			 * checked that they match the requested files, so disallow this */
++-			fprintf(stderr, "-r destination \"%s\" must not already exist\n", dest);
++-			exit(1);
+++		if (iamrecursive) {
+++			/* Destination must not exist */
+++			if (!(access(dest, F_OK) == -1 && errno == ENOENT)) {
+++				/* paths sent from the server in recursive mode aren't adequately
+++				 * checked that they match the requested files, so disallow this */
+++				fprintf(stderr, "-r destination \"%s\" must not already exist\n", dest);
+++				exit(1);
+++			}
++ 		}
++ 
++ 		host = cleanhostname(host);
+diff --git a/package/network/services/dropbear/patches/100-pubkey_path.patch b/package/network/services/dropbear/patches/100-pubkey_path.patch
+index 5aafdff..8972d16 100644
+--- a/package/network/services/dropbear/patches/100-pubkey_path.patch
++++ b/package/network/services/dropbear/patches/100-pubkey_path.patch
+@@ -3,7 +3,7 @@
+ 
+ --- a/src/svr-authpubkey.c
+ +++ b/src/svr-authpubkey.c
+-@@ -79,6 +79,39 @@ static void send_msg_userauth_pk_ok(cons
++@@ -80,6 +80,39 @@ static void send_msg_userauth_pk_ok(cons
+  		const unsigned char* keyblob, unsigned int keybloblen);
+  static int checkfileperm(char * filename);
+  
+@@ -43,7 +43,7 @@
+  /* process a pubkey auth request, sending success or failure message as
+   * appropriate */
+  void svr_auth_pubkey(int valid_user) {
+-@@ -439,16 +472,22 @@ out:
++@@ -450,16 +483,22 @@ out:
+  static char *authorized_keys_filepath() {
+  	size_t len = 0;
+  	char *pathname = NULL, *dir = NULL;
+@@ -69,7 +69,7 @@
+  	m_free(dir);
+  	return pathname;
+  }
+-@@ -549,11 +588,23 @@ out:
++@@ -563,11 +602,23 @@ out:
+   * When this path is inside the user's home dir it checks up to and including
+   * the home dir, otherwise it checks every path component. */
+  static int checkpubkeyperms() {
+-- 
+2.51.0

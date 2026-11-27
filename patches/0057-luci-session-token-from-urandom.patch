@@ -1,0 +1,49 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] luci: derive the session token from /dev/urandom
+SPDX-License-Identifier: Apache-2.0
+
+Backport luci master df71c66019 ("luci-base: dispatcher: derive session
+token from /dev/urandom"), which is not on openwrt-25.12. randomid()
+built the token from math.rand(), seeded with the wall-clock millisecond
+in each freshly forked request process; it now reads the bytes from
+/dev/urandom and returns null on a short read. readfile() and hexenc()
+exist in this image's ucode (2026-01-16). Applies after 0039 and 0055.
+
+---
+ modules/luci-base/ucode/dispatcher.uc | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/modules/luci-base/ucode/dispatcher.uc b/modules/luci-base/ucode/dispatcher.uc
+index 9681702ab0..bc98076c34 100644
+--- a/modules/luci-base/ucode/dispatcher.uc
++++ b/modules/luci-base/ucode/dispatcher.uc
+@@ -1,11 +1,10 @@
+ // Copyright 2022 Jo-Philipp Wich <jo@mein.io>
+ // Licensed to the public under the Apache License 2.0.
+ 
+-import { open, stat, glob, lsdir, unlink, basename } from 'fs';
++import { open, readfile, stat, glob, lsdir, unlink, basename } from 'fs';
+ import { striptags, entityencode } from 'html';
+ import { connect } from 'ubus';
+ import { cursor } from 'uci';
+-import { rand } from 'math';
+ import { openlog, syslog, closelog, LOG_INFO, LOG_WARNING, LOG_AUTHPRIV } from 'log';
+ 
+ import { hash, load_catalog, change_catalog, translate, ntranslate, getuid } from 'luci.core';
+@@ -487,12 +486,12 @@ function session_retrieve(sid, allowed_users) {
+ }
+ 
+ function randomid(num_bytes) {
+-	let bytes = [];
++	let data = readfile('/dev/urandom', num_bytes);
+ 
+-	while (num_bytes-- > 0)
+-		push(bytes, sprintf('%02x', rand() % 256));
++	if (length(data) != num_bytes)
++		return null;
+ 
+-	return join('', bytes);
++	return hexenc(data);
+ }
+ 
+ function session_setup(user, pass, path) {

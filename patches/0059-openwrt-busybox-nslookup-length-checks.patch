@@ -1,0 +1,108 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] busybox: nslookup reply length checks
+SPDX-License-Identifier: GPL-2.0-only
+
+Add upstream busybox c64ffa2e2 ("nslookup: tighten up length checks to
+avoid out-of-bounds reads") as patch 014: parse_reply() could read past
+a malformed DNS answer. nslookup is built into this busybox and runs
+only when started by hand. Upstream's own CVE-2026-88833 fix (56e9d36bb)
+needs code newer than 1.37.0, so 013 from 0043 stays.
+
+---
+ package/utils/busybox/Makefile                |  2 +-
+ ...-checks-to-avoid-out-of-bounds-reads.patch | 74 +++++++++++++++++++
+ 2 files changed, 75 insertions(+), 1 deletion(-)
+
+diff --git a/package/utils/busybox/Makefile b/package/utils/busybox/Makefile
+index bb7f196..3028f25 100644
+--- a/package/utils/busybox/Makefile
++++ b/package/utils/busybox/Makefile
+@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=busybox
+ PKG_VERSION:=1.37.0
+-PKG_RELEASE:=8
++PKG_RELEASE:=9
+ PKG_FLAGS:=essential
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+diff --git a/package/utils/busybox/patches/014-nslookup-tighten-up-length-checks-to-avoid-out-of-bounds-reads.patch b/package/utils/busybox/patches/014-nslookup-tighten-up-length-checks-to-avoid-out-of-bounds-reads.patch
+new file mode 100644
+index 0000000..dd1f154
+--- /dev/null
++++ b/package/utils/busybox/patches/014-nslookup-tighten-up-length-checks-to-avoid-out-of-bounds-reads.patch
+@@ -0,0 +1,74 @@
++From c64ffa2e2b98e76e8f27c90d12f05d6239422011 Mon Sep 17 00:00:00 2001
++From: Denys Vlasenko <vda.linux@googlemail.com>
++Date: Sat, 7 Nov 2026 20:30:35 +0100
++Subject: [PATCH] nsloopup: tighten up length checks to avoid out-of-bounds
++ reads
++
++function                                             old     new   delta
++parse_reply                                          979    1030     +51
++
++Signed-off-by: Denys Vlasenko <vda.linux@googlemail.com>
++(cherry picked from commit c64ffa2e2b98e76e8f27c90d12f05d6239422011)
++---
++ networking/nslookup.c | 17 ++++++++++-------
++ 1 file changed, 10 insertions(+), 7 deletions(-)
++
++diff --git a/networking/nslookup.c b/networking/nslookup.c
++index b67d354f7..b14762b7e 100644
++--- a/networking/nslookup.c
+++++ b/networking/nslookup.c
++@@ -721,7 +721,7 @@ static NOINLINE int parse_reply(const unsigned char *msg, size_t len)
++ 	int i, n, rdlen;
++ 	const char *format = NULL;
++ 	char astr[INET6_ADDRSTRLEN], dname[MAXDNAME];
++-	const unsigned char *cp;
+++	const unsigned char *start, *cp;
++ 
++ 	header = (HEADER *)msg;
++ 	if (!header->aa)
++@@ -809,6 +809,10 @@ static NOINLINE int parse_reply(const unsigned char *msg, size_t len)
++ 			}
++ 			n = *(unsigned char *)ns_rr_rdata(rr);
++ 			if (n > 0) {
+++				if (rdlen <= n) {
+++					//printf("TXT record too short\n");
+++					return -1;
+++				}
++ 				memset(dname, 0, sizeof(dname));
++ 				memcpy(dname, ns_rr_rdata(rr) + 1, n);
++ 				printf("%s\ttext = \"%s\"\n", ns_rr_name(rr), dname);
++@@ -839,10 +843,9 @@ static NOINLINE int parse_reply(const unsigned char *msg, size_t len)
++ 				dbg("SOA record too short:%d\n", rdlen);
++ 				return -1;
++ 			}
++-
++ 			printf("%s\n", ns_rr_name(rr));
++ 
++-			cp = ns_rr_rdata(rr);
+++			start = cp = ns_rr_rdata(rr);
++ 			n = ns_name_uncompress(ns_msg_base(handle), ns_msg_end(handle),
++ 			                       cp, dname, sizeof(dname));
++ 			if (n < 0) {
++@@ -863,18 +866,18 @@ static NOINLINE int parse_reply(const unsigned char *msg, size_t len)
++ 			printf("\tmail addr = %s\n", dname);
++ 			cp += n;
++ 
+++			if (rdlen < (cp - start) + 20) {
+++				dbg("SOA record too short:%d\n", rdlen);
+++				return -1;
+++			}
++ 			printf("\tserial = %lu\n", ns_get32(cp));
++ 			cp += 4;
++-
++ 			printf("\trefresh = %lu\n", ns_get32(cp));
++ 			cp += 4;
++-
++ 			printf("\tretry = %lu\n", ns_get32(cp));
++ 			cp += 4;
++-
++ 			printf("\texpire = %lu\n", ns_get32(cp));
++ 			cp += 4;
++-
++ 			printf("\tminimum = %lu\n", ns_get32(cp));
++ 			break;
++ 

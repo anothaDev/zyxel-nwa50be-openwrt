@@ -47,10 +47,12 @@ Confirm the board revision and pin-1 triangle before wiring. See
 
 ## What was verified
 
-The current source targets TIP/OpenWiFi `v5.1.0` with the local security patch
-stack, including a correction to an upstream stale-peer locking regression.
-That candidate is not yet hardware-validated. The live-device results below
-apply to the earlier `v5.1.0-rc1` build; see [docs/VALIDATION.md](docs/VALIDATION.md)
+The current source targets the TIP/OpenWiFi `v5.1.1` release with the local
+security patch stack (see [docs/BUILD.md](docs/BUILD.md) for the patch list),
+including a correction to an upstream stale-peer locking regression. That
+candidate builds and passes artifact verification. The live-device results
+below apply to the earlier `v5.1.0-rc1` build; see
+[docs/VALIDATION.md](docs/VALIDATION.md)
 for the separate build and hardware acceptance boundaries.
 
 One NWA50BE was unlocked through Zyxel's official waiver flow, RAM-booted,

@@ -1,0 +1,28 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+include /lib/upgrade
+
+nwa50be_stop() {
+	echo 'NWA50BE_GUARD_FAILED: upgrade stopped; do not power-cycle; UART recovery may be required' >&2
+	sync
+	# PID1 reboots whenever stage2 exits, even on error. Stay alive instead.
+	# upgraded continues feeding the watchdog while waiting for this process.
+	while :; do sleep 60; done
+}
+
+v "Performing system upgrade..."
+[ "$(board_name)" = 'zyxel,nwa50be' ] || nwa50be_stop
+[ "$IMAGE" = @STAGE@/image.tar ] || nwa50be_stop
+type platform_do_upgrade >/dev/null 2>/dev/null || nwa50be_stop
+platform_do_upgrade "$IMAGE" || nwa50be_stop
+
+v "Upgrade and backup readback verified"
+sleep 1
+
+v "Rebooting system..."
+umount -a
+reboot -f
+sleep 5
+echo b 2>/dev/null >/proc/sysrq-trigger

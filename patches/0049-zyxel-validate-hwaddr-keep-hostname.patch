@@ -1,0 +1,187 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] zyxel: validate hwaddr= and keep the user's hostname
+SPDX-License-Identifier: GPL-2.0-only
+
+board.d/02_network took everything after "hwaddr=" on the kernel command
+line as the MAC for the Zyxel NWA50BE, NWA130BE and NWA210BE. When U-Boot
+passes no hwaddr=, as on the NWA50BE with this firmware, the whole command
+line became the label MAC ("co:ns:ol:e=:tt:yM:SM:0,..."). A value given
+in colon form was mangled too.
+
+Accept hwaddr= only as 12 hex digits, with or without colons, and not
+all zero or multicast. Without a valid one, the NWA50BE uses the
+addresses its first-boot script gives eth0 (:01) and the radios (:10,
+:20): on an upgrade the eth0 address kept in the restored network
+config, on a fresh unit the prefix that script derives from the SoC
+serial. The NWA130BE and NWA210BE set no MAC rather than a bogus one.
+
+99-ucentral-hostname runs again after every upgrade and replaced the
+hostname, system.mac and ucentral.config.serial from the label MAC. It now
+uses only a valid unicast MAC (label, then eth0), keeps a hostname the
+user chose, and replaces only a missing, "OpenWrt" or non-RFC 1123 one.
+
+---
+ .../ipq53xx/base-files/etc/board.d/02_network | 76 +++++++++++++++----
+ .../etc/uci-defaults/99-ucentral-hostname     | 46 +++++++++--
+ 2 files changed, 99 insertions(+), 23 deletions(-)
+
+diff --git a/feeds/qca-wifi-7/ipq53xx/base-files/etc/board.d/02_network b/feeds/qca-wifi-7/ipq53xx/base-files/etc/board.d/02_network
+index 08f08920..7c5131ae 100755
+--- a/feeds/qca-wifi-7/ipq53xx/base-files/etc/board.d/02_network
++++ b/feeds/qca-wifi-7/ipq53xx/base-files/etc/board.d/02_network
+@@ -59,6 +59,47 @@ ipq53xx_setup_interfaces()
+ 	esac
+ }
+ 
++# Print the MAC from hwaddr= on the kernel command line, or nothing when
++# it is missing, not 12 hex digits, all zero or multicast. Without this
++# check a boot that passes no hwaddr= turned the whole command line into
++# the "MAC".
++zyxel_cmdline_mac()
++{
++	local mac
++
++	mac=$(tr ' ' '\n' </proc/cmdline | sed -n 's/^hwaddr=//p' | tail -n 1)
++	mac=$(echo "$mac" | tr -d ':' | tr 'A-F' 'a-f')
++	case "$mac" in
++	*[!0-9a-f]*|000000000000|?[13579bdf]*) return ;;
++	esac
++	[ "${#mac}" -eq 12 ] || return
++	echo "$mac" | sed 's/\(..\)/\1:/g;s/:$//'
++}
++
++# NWA50BE without hwaddr=: the locally administered prefix of the addresses
++# the first-boot script gives eth0 (:01) and the radios (:10, :20), so
++# board.json matches the addresses the interfaces really use. An upgraded
++# unit keeps the address it was given (sysupgrade restores the network
++# config before this runs); a fresh one gets the prefix the first-boot
++# script will derive from the SoC serial.
++nwa50be_mac_prefix()
++{
++	local mac serial hash
++
++	mac=$(uci -q get network.eth0_device.macaddr)
++	case "$mac" in
++	02:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:01)
++		echo "${mac%:01}"
++		return
++		;;
++	esac
++
++	serial=$(cat /sys/devices/soc0/serial_number 2>/dev/null)
++	[ -n "$serial" ] || return
++	hash=$(printf '%s' "$serial" | sha256sum | cut -c1-8)
++	echo "$hash" | sed -n 's/^\(..\)\(..\)\(..\)\(..\)$/02:\1:\2:\3:\4/p'
++}
++
+ qcom_setup_macs()
+ {
+         local board="$1"
+@@ -141,10 +182,8 @@ qcom_setup_macs()
+ 		ucidef_set_wireless_macaddr_base 6g $(macaddr_add "$wan_mac" 4)
+ 		;;
+ 	zyxel,nwa130be)
+-		wan_mac=$(cat /proc/cmdline)
+-		wan_mac="${wan_mac##*hwaddr=}"
+-		wan_mac="${wan_mac%% *}"
+-		wan_mac="$(echo ${wan_mac} | sed 's/\(..\)/\1:/g;s/:$//')"
++		wan_mac=$(zyxel_cmdline_mac)
++		[ -n "$wan_mac" ] || return
+ 		lan_mac=$(macaddr_add "$wan_mac" 1)
+ 		ucidef_set_network_device_mac eth0 $wan_mac
+ 		ucidef_set_network_device_mac eth1 $lan_mac
+@@ -154,10 +193,8 @@ qcom_setup_macs()
+ 		ucidef_set_wireless_macaddr_base 6g $(macaddr_add "$wan_mac" 4)
+ 		;;
+ 	zyxel,nwa210be)
+-		wan_mac=$(cat /proc/cmdline)
+-		wan_mac="${wan_mac##*hwaddr=}"
+-		wan_mac="${wan_mac%% *}"
+-		wan_mac="$(echo ${wan_mac} | sed 's/\(..\)/\1:/g;s/:$//')"
++		wan_mac=$(zyxel_cmdline_mac)
++		[ -n "$wan_mac" ] || return
+ 		lan_mac=$(macaddr_add "$wan_mac" 1)
+ 		ucidef_set_network_device_mac eth0 $wan_mac
+ 		ucidef_set_network_device_mac eth1 $lan_mac
+@@ -166,14 +203,21 @@ qcom_setup_macs()
+ 		ucidef_set_wireless_macaddr_base 5g $(macaddr_add "$wan_mac" 3)
+ 		;;
+ 	zyxel,nwa50be)
+-		wan_mac=$(cat /proc/cmdline)
+-		wan_mac="${wan_mac##*hwaddr=}"
+-		wan_mac="${wan_mac%% *}"
+-		wan_mac="$(echo ${wan_mac} | sed 's/\(..\)/\1:/g;s/:$//')"
+-		ucidef_set_network_device_mac eth0 $wan_mac
+-		ucidef_set_label_macaddr $wan_mac
+-		ucidef_set_wireless_macaddr_base 2g $(macaddr_add "$wan_mac" 1)
+-		ucidef_set_wireless_macaddr_base 5g $(macaddr_add "$wan_mac" 2)
++		wan_mac=$(zyxel_cmdline_mac)
++		if [ -n "$wan_mac" ]; then
++			ucidef_set_network_device_mac eth0 $wan_mac
++			ucidef_set_label_macaddr $wan_mac
++			ucidef_set_wireless_macaddr_base 2g $(macaddr_add "$wan_mac" 1)
++			ucidef_set_wireless_macaddr_base 5g $(macaddr_add "$wan_mac" 2)
++		else
++			mac_prefix=$(nwa50be_mac_prefix)
++			[ -n "$mac_prefix" ] || return
++			wan_mac="$mac_prefix:01"
++			ucidef_set_network_device_mac eth0 $wan_mac
++			ucidef_set_label_macaddr $wan_mac
++			ucidef_set_wireless_macaddr_base 2g "$mac_prefix:10"
++			ucidef_set_wireless_macaddr_base 5g "$mac_prefix:20"
++		fi
+ 		;;
+         asterfusion,AP7330)
+                 mtd=$(find_mtd_chardev "0:ART")
+diff --git a/feeds/ucentral/ucentral-schema/files/etc/uci-defaults/99-ucentral-hostname b/feeds/ucentral/ucentral-schema/files/etc/uci-defaults/99-ucentral-hostname
+index 2790307a..818e12a3 100755
+--- a/feeds/ucentral/ucentral-schema/files/etc/uci-defaults/99-ucentral-hostname
++++ b/feeds/ucentral/ucentral-schema/files/etc/uci-defaults/99-ucentral-hostname
+@@ -1,8 +1,40 @@
+-#!/bin.sh
++#!/bin/sh
+ 
+-hname=$(cat /etc/board.json  | jsonfilter -e '@.system.label_macaddr')
+-[ -z "$hname" ] && hname=$(cat /sys/class/net/eth0/address)
+-uci set system.@system[-1].mac=$hname
+-hname=$(echo $hname | tr -d : | awk '{print tolower($0)}')
+-uci set system.@system[-1].hostname=$hname
+-uci set ucentral.config.serial=$hname
++# A unicast, non-zero MAC in colon form. A shell pattern matches the whole
++# value, so a multi-line value cannot pass.
++valid_mac() {
++	case "$1" in
++	?[13579bBdDfF]:*) return 1 ;;
++	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]) ;;
++	*) return 1 ;;
++	esac
++	# at least one non-zero digit
++	case "$1" in
++	*[1-9a-fA-F]*) return 0 ;;
++	esac
++	return 1
++}
++
++# RFC 1123 host name: dot-separated labels of 1 to 63 letters, digits and
++# hyphens that neither start nor end with a hyphen, 253 characters at most.
++valid_hostname() {
++	case "$1" in
++	''|*[!A-Za-z0-9.-]*) return 1 ;;
++	esac
++	[ "${#1}" -le 253 ] || return 1
++	printf '%s\n' "$1" | grep -q -E '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$'
++}
++
++mac=$(jsonfilter -i /etc/board.json -e '@.system.label_macaddr' 2>/dev/null)
++valid_mac "$mac" || mac=$(cat /sys/class/net/eth0/address 2>/dev/null)
++if valid_mac "$mac"; then
++	serial=$(printf '%s' "$mac" | tr -d : | tr 'A-F' 'a-f')
++	uci set system.@system[-1].mac="$mac"
++	uci set ucentral.config.serial="$serial"
++	# Runs again after every upgrade: keep a hostname the user chose and
++	# replace only a missing, default or invalid one.
++	hostname=$(uci -q get system.@system[-1].hostname)
++	if [ "$hostname" = OpenWrt ] || ! valid_hostname "$hostname"; then
++		uci set system.@system[-1].hostname="$serial"
++	fi
++fi

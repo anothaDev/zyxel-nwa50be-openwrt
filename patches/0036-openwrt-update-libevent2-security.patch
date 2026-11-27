@@ -1,0 +1,34 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] libevent2: update to 2.1.13 security release
+SPDX-License-Identifier: GPL-2.0-only
+
+Update libevent2 to 2.1.13-stable from OpenWrt main commit 1950d3dbfa09.
+This fixes CVE-2026-63379, CVE-2026-63381 through CVE-2026-63385,
+CVE-2026-63387 and CVE-2026-63388; the libevent-2.1.so.7 soname is
+unchanged.
+
+---
+ package/libs/libevent2/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/package/libs/libevent2/Makefile b/package/libs/libevent2/Makefile
+--- a/package/libs/libevent2/Makefile
++++ b/package/libs/libevent2/Makefile
+@@ -8,12 +8,12 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=libevent2
+-PKG_VERSION:=2.1.12
+-PKG_RELEASE:=2
++PKG_VERSION:=2.1.13
++PKG_RELEASE:=1
+ 
+ PKG_SOURCE:=libevent-$(PKG_VERSION)-stable.tar.gz
+ PKG_SOURCE_URL:=https://github.com/libevent/libevent/releases/download/release-$(PKG_VERSION)-stable
+-PKG_HASH:=92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb
++PKG_HASH:=f7e9383b8c0baa81b687e5b5eecc01beefaf1b19b64151d95ed61647fe7a315c
+ PKG_BUILD_DIR:=$(BUILD_DIR)/libevent-$(PKG_VERSION)-stable
+ 
+ PKG_MAINTAINER:=Jo-Philipp Wich <jo@mein.io>
+-- 
+2.51.0

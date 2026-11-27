@@ -1,0 +1,199 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] hostapd: backport w1.fi 2026-1 multi-link validation fixes
+SPDX-License-Identifier: BSD-3-Clause
+
+Fix CVE-2026-58374 (w1.fi security advisory 2026-1) in the qca-wifi-7
+hostapd package. Before this change, a crafted (Re)Association Request
+with a Basic Multi-Link element could make hostapd write one entry past
+sta->mld_info.links[] (link ID 15). The parser runs for any BSS with EHT
+enabled and WPA/RSN active, including a single-link BSS without MLO.
+
+Backported upstream hostap commits:
+  46dd5a4ffc9bcf44cf8fc45120b3e1e5ec922187 AP Basic MLE link ID
+  aa9d345887389a251c63a3781d2ad2940d079193 BSS Basic MLE link ID
+  a8531e3d871e6fa72f2f85d91e9f787326b2af8b assoc rejection link IDs
+  e4bd3442c2223802bf8c4a4d868e3b9443c7caf4 reconfiguration link IDs
+  ce1a8612e309fe86133ecf05ffb452b0bdf3b035 ML probe request bitmap
+  41c86a2ebed50567c73de23c102c2bf83eb883f2 assoc Common Info length
+Not applicable to snapshot 95ad7115: 56216d113909650ae59621dc2dd16157afb94948
+(get_basic_mle_link_id() is absent), the wnm_sta.c hunk of e4bd3442c222,
+and 595194d0305189922a057e8ea8b743a1bd8d2d29 (the fields it bounds are
+not parsed in this version of wpa_bss_parse_basic_ml_element()).
+
+The patch goes last in openwrt-patches because the AP link
+reconfiguration parser that e4bd3442c222 fixes is added by that series
+(r93-0003). Every hunk applies without fuzz; the later wlan-app-extns
+patches still apply, four of them at line offsets shifted by three.
+
+---
+ .../zz-001-hostapd-w1fi-2026-1-mlo-validation.patch        | 162 +++++++++++++++++++++
+ 1 file changed, 162 insertions(+)
+
+diff --git a/feeds/qca-wifi-7/hostapd/openwrt-patches/services/hostapd/patches/zz-001-hostapd-w1fi-2026-1-mlo-validation.patch b/feeds/qca-wifi-7/hostapd/openwrt-patches/services/hostapd/patches/zz-001-hostapd-w1fi-2026-1-mlo-validation.patch
+new file mode 100644
+index 0000000000..a19381e596
+--- /dev/null
++++ b/feeds/qca-wifi-7/hostapd/openwrt-patches/services/hostapd/patches/zz-001-hostapd-w1fi-2026-1-mlo-validation.patch
+@@ -0,0 +1,162 @@
++From: NWA50BE OpenWrt Project <noreply@invalid.example>
++Subject: [PATCH] MLD: validate received Multi-Link element data (w1.fi 2026-1)
++
++Backport of the fixes listed in w1.fi security advisory 2026-1
++(CVE-2026-58374, missing multi-link parsing validation) to the
++95ad71157e30 snapshot as patched by the QCA series. Link ID 15 fits the
++4-bit field but is invalid; Basic MLE parsing used it as an index into
++the 15-entry links[] array. The STA-mode association parser also lacked
++a check that the Common Info length stays within the element.
++
++Upstream hostap commits:
++  46dd5a4ffc9b AP MLD: Fix link ID validation in Basic MLE parsing
++  aa9d34588738 BSS: Add bounds check for link_id in Basic MLE parsing
++  a8531e3d871e MLD: Validate MLE Link ID fields in association rejection case
++  e4bd3442c222 MLD: Verify link ID validity in MLE in reconfiguration cases
++  ce1a8612e309 AP MLD: Verify AP MLD link ID validity before updating bitmap of links
++  41c86a2ebed5 MLD: Fix length check in common info for association failure cases
++
++Adapted to this tree: the per-STA link ID mask is
++EHT_PER_STA_CTRL_LINK_ID_MSK, and the AP link reconfiguration parser
++comes from the QCA series rather than upstream. Not applicable here:
++56216d113909 (get_basic_mle_link_id() does not exist in this snapshot),
++the wnm_sta.c hunk of e4bd3442c222 (wnm_parse_neighbor_report_multi_link()
++does not exist), and 595194d03051 (this wpa_bss_parse_basic_ml_element()
++does not read the MSD, EML or MLD capability fields).
++
++---
++ src/ap/beacon.c         |  5 ++++-
++ src/ap/ieee802_11_eht.c | 12 ++++++++++--
++ wpa_supplicant/bss.c    |  8 +++++++-
++ wpa_supplicant/events.c | 18 +++++++++++++++++-
++ 4 files changed, 38 insertions(+), 5 deletions(-)
++
++diff --git a/src/ap/beacon.c b/src/ap/beacon.c
++index 402381c..b9bd5e3 100644
++--- a/src/ap/beacon.c
+++++ b/src/ap/beacon.c
++@@ -1492,6 +1492,7 @@ static bool parse_ml_probe_req(const struct ieee80211_eht_ml *ml, size_t ml_len,
++ 	for_each_element_id(sub, 0, pos, len) {
++ 		const struct ieee80211_eht_per_sta_profile *sta;
++ 		u16 sta_control;
+++		u8 link_id;
++ 
++ 		if (*links == 0xffff)
++ 			*links = 0;
++@@ -1511,7 +1512,9 @@ static bool parse_ml_probe_req(const struct ieee80211_eht_ml *ml, size_t ml_len,
++ 		 * partial profile was requested.
++ 		 */
++ 		sta_control = le_to_host16(sta->sta_control);
++-		*links |= BIT(sta_control & EHT_PER_STA_CTRL_LINK_ID_MSK);
+++		link_id = sta_control & EHT_PER_STA_CTRL_LINK_ID_MSK;
+++		if (link_id < MAX_NUM_MLD_LINKS)
+++			*links |= BIT(link_id);
++ 	}
++ 
++ 	if (!for_each_element_completed(sub, pos, len)) {
++diff --git a/src/ap/ieee802_11_eht.c b/src/ap/ieee802_11_eht.c
++index a02a16b..85bf886 100644
++--- a/src/ap/ieee802_11_eht.c
+++++ b/src/ap/ieee802_11_eht.c
++@@ -1312,6 +1312,7 @@ u16 hostapd_process_ml_assoc_req(struct hostapd_data *hapd,
++ 		size_t sta_info_len;
++ 		u16 control;
++ 		const u8 *sub_elem_end;
+++		u8 link_id;
++ 
++ 		wpa_printf(MSG_DEBUG, "MLD: sub element len=%zu",
++ 			   sub_elem_len);
++@@ -1350,8 +1351,13 @@ u16 hostapd_process_ml_assoc_req(struct hostapd_data *hapd,
++ 			goto out;
++ 		}
++ 		control = WPA_GET_LE16(pos);
++-		link_info = &info->links[control &
++-					 EHT_PER_STA_CTRL_LINK_ID_MSK];
+++		link_id = control & EHT_PER_STA_CTRL_LINK_ID_MSK;
+++		if (link_id >= MAX_NUM_MLD_LINKS) {
+++			wpa_printf(MSG_DEBUG,
+++				   "MLD: Invalid Link ID in Per-STA Profile subelement");
+++			goto out;
+++		}
+++		link_info = &info->links[link_id];
++ 		pos += 2;
++ 
++ 		if (!(control & EHT_PER_STA_CTRL_COMPLETE_PROFILE_MSK)) {
++@@ -2095,6 +2101,8 @@ hostapd_parse_link_reconf_req_sta_profile(struct hostapd_data *hapd,
++ 
++ 	link_id = sta_control & EHT_PER_STA_RECONF_CTRL_LINK_ID_MSK;
++ 	wpa_printf(MSG_DEBUG, "MLD: Per-STA profile for link=%u", link_id);
+++	if (link_id >= MAX_NUM_MLD_LINKS)
+++		goto out;
++ 
++ 	reconf_type_mask =
++ 		sta_control & EHT_PER_STA_RECONF_CTRL_OP_UPDATE_TYPE_MSK;
++diff --git a/wpa_supplicant/bss.c b/wpa_supplicant/bss.c
++index d1132ff..32e8e6f 100644
++--- a/wpa_supplicant/bss.c
+++++ b/wpa_supplicant/bss.c
++@@ -1940,6 +1940,11 @@ int wpa_bss_parse_basic_ml_element(struct wpa_supplicant *wpa_s,
++ 			  ETH_ALEN);
++ 
++ 	link_id = ml_basic_common_info->variable[0] & EHT_ML_LINK_ID_MSK;
+++	if (link_id >= MAX_NUM_MLD_LINKS) {
+++		wpa_printf(MSG_DEBUG, "MLD: Invalid link ID %u in Basic MLE",
+++			   link_id);
+++		goto out;
+++	}
++ 
++ 	bss->mld_link_id = link_id;
++ 	seen = bss->valid_links = BIT(link_id);
++@@ -2109,7 +2114,8 @@ u16 wpa_bss_parse_reconf_ml_element(struct wpa_supplicant *wpa_s,
++ 			u8 link_id;
++ 
++ 			link_id = control & EHT_PER_STA_RECONF_CTRL_LINK_ID_MSK;
++-			removed_links |= BIT(link_id);
+++			if (link_id < MAX_NUM_MLD_LINKS)
+++				removed_links |= BIT(link_id);
++ 		}
++ 
++ 		pos += 2 + sub_elem_len;
++diff --git a/wpa_supplicant/events.c b/wpa_supplicant/events.c
++index 44f1c90..63c60a6 100644
++--- a/wpa_supplicant/events.c
+++++ b/wpa_supplicant/events.c
++@@ -3990,6 +3990,13 @@ static unsigned int wpas_ml_parse_assoc(struct wpa_supplicant *wpa_s,
++ 		goto out;
++ 	}
++ 
+++	if (sizeof(*ml) + common_info->len > ml_len) {
+++		wpa_printf(MSG_DEBUG,
+++			   "MLD: Truncated common info (common_info->len=%u ml_len=%zu)",
+++			   common_info->len, ml_len);
+++		goto out;
+++	}
+++
++ 	wpa_printf(MSG_DEBUG, "MLD: address: " MACSTR,
++ 		   MAC2STR(common_info->mld_addr));
++ 
++@@ -4002,7 +4009,12 @@ static unsigned int wpas_ml_parse_assoc(struct wpa_supplicant *wpa_s,
++ 	pos = common_info->variable;
++ 
++ 	/* Store the information for the association link */
++-	ml_info[i].link_id = *pos;
+++	ml_info[i].link_id = *pos & EHT_ML_LINK_ID_MSK;
+++	if (ml_info[i].link_id >= MAX_NUM_MLD_LINKS) {
+++		wpa_printf(MSG_DEBUG,
+++			   "MLD: Invalid Link ID value for assoc link");
+++		goto out;
+++	}
++ 	pos++;
++ 
++ 	/* Skip the BSS Parameters Change Count */
++@@ -4143,6 +4155,10 @@ static unsigned int wpas_ml_parse_assoc(struct wpa_supplicant *wpa_s,
++ 			   MAC2STR(pos + 1), nstr_bitmap_len);
++ 
++ 		ml_info[i].link_id = ctrl & EHT_PER_STA_CTRL_LINK_ID_MSK;
+++		if (ml_info[i].link_id >= MAX_NUM_MLD_LINKS) {
+++			wpa_printf(MSG_DEBUG, "MLD: Invalid Link ID value");
+++			goto out;
+++		}
++ 		os_memcpy(ml_info[i].bssid, pos + 1, ETH_ALEN);
++ 
++ 		pos += sta_info_len;

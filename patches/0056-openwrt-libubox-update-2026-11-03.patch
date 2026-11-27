@@ -1,0 +1,39 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] libubox: update to Git openwrt-25.12 (2026-11-03)
+SPDX-License-Identifier: GPL-2.0-only
+
+Backport openwrt-25.12 7b8ce1e095 and 6c57f7cd04: libubox 8156338 ->
+ff13b89, 25 upstream commits that harden blob, blobmsg, JSON, jshn,
+json_script, usock and udebug parsing against overflows and
+out-of-bounds reads; ff13b89 stops an out-of-bounds read that could put
+memory contents into JSON output (rpcd, ubus monitor). Inputs reach it
+through local ubus clients. The ABI version stays 20260213 (only inline
+helper bodies in blob.h change), and TIP's 000-runqueue-cancle and
+001-CLOCK_BOOTTIME patches apply to the new source at fuzz 0.
+
+---
+ package/libs/libubox/Makefile | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/package/libs/libubox/Makefile b/package/libs/libubox/Makefile
+index 6fac67d421..b1668b8927 100644
+--- a/package/libs/libubox/Makefile
++++ b/package/libs/libubox/Makefile
+@@ -1,13 +1,13 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=libubox
+-PKG_RELEASE=2
++PKG_RELEASE=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/libubox.git
+-PKG_MIRROR_HASH:=55b2298ea74bb4c7267e4b615d442aeff601e0de88ec0e641e4c40eed8454e85
+-PKG_SOURCE_DATE:=2026-03-13
+-PKG_SOURCE_VERSION:=815633847cd32ffe6da28943cbeb37edc88265c8
++PKG_MIRROR_HASH:=85cd7eb507b6f48922aab16c1dd6b5ce62493dbb1c7369536b73a350c94e1a15
++PKG_SOURCE_DATE:=2026-11-02
++PKG_SOURCE_VERSION:=ff13b89e82e64cdd7853419504e51ec0c7e487e0
+ # PKG_ABI_VERSION:=$(call abi_version_str,$(PKG_SOURCE_DATE))
+ PKG_ABI_VERSION:=20260213
+ CMAKE_INSTALL:=1

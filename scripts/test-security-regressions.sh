@@ -280,9 +280,15 @@ if grep -Fq 'firewall.nwa50be_management.src_ip=' "$firstboot_log"; then
 	exit 1
 fi
 
-grep -Fxq 'destroy table bridge nwa50be_management' \
+grep -Fq 'hook ingress device eth0 priority -500' \
 	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
-grep -Fq 'iifname != "eth0" drop' \
+grep -Fq 'meta mark set meta mark | 0x40000000' \
+	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'hook input priority -10' \
+	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'meta mark & 0x40000000 == 0 drop' \
+	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$project/overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fxq '/etc/init.d/firewall reload' "$project/overlay/root/nwa50be-setup"
 if grep -Fq '/etc/init.d/firewall restart' "$project/overlay/root/nwa50be-setup"; then

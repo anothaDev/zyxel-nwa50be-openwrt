@@ -1,0 +1,58 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] mbedtls: update to 3.6.8
+SPDX-License-Identifier: GPL-2.0-only
+
+Follow OpenWrt main 2d7bcf13d8: Mbed TLS 3.6.8, a security release (TLS
+1.2 session tickets from another TLS version are rejected,
+CVE-2026-93831; TLS 1.3 transform and ticket resource leaks,
+CVE-2026-93843 and CVE-2026-115491; second ClientHello handling after a
+HelloRetryRequest; and further X.509, CRL and side-channel fixes). On
+this image apk uses Mbed TLS for its HTTPS downloads.
+
+100-fix-gcc14-build.patch is dropped as in main: Mbed TLS fixed the
+GCC 14 issue itself in 3.6.6 (292b96c0). 101-remove-test.patch applies
+to 3.6.8 at fuzz 0. Main's 102 (arm32 and x86 with GCC 15) does not
+concern this aarch64 GCC 14 build.
+
+---
+ package/libs/mbedtls/Makefile                         |  4 ++--
+ .../libs/mbedtls/patches/100-fix-gcc14-build.patch    | 11 -----------
+ 2 files changed, 2 insertions(+), 13 deletions(-)
+
+diff --git a/package/libs/mbedtls/Makefile b/package/libs/mbedtls/Makefile
+index 2745c38..af4bfab 100644
+--- a/package/libs/mbedtls/Makefile
++++ b/package/libs/mbedtls/Makefile
+@@ -8,13 +8,13 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=mbedtls
+-PKG_VERSION:=3.6.7
++PKG_VERSION:=3.6.8
+ PKG_RELEASE:=1
+ PKG_BUILD_FLAGS:=no-mips16 gc-sections no-lto
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+ PKG_SOURCE_URL=https://github.com/Mbed-TLS/$(PKG_NAME)/releases/download/$(PKG_NAME)-$(PKG_VERSION)
+-PKG_HASH:=a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
++PKG_HASH:=bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
+ 
+ PKG_LICENSE:=GPL-2.0-or-later
+ PKG_LICENSE_FILES:=LICENSE
+diff --git a/package/libs/mbedtls/patches/100-fix-gcc14-build.patch b/package/libs/mbedtls/patches/100-fix-gcc14-build.patch
+deleted file mode 100644
+index 78240ee..0000000
+--- a/package/libs/mbedtls/patches/100-fix-gcc14-build.patch
++++ /dev/null
+@@ -1,11 +0,0 @@
+---- a/library/common.h
+-+++ b/library/common.h
+-@@ -224,7 +224,7 @@ static inline void mbedtls_xor(unsigned
+-         uint8x16_t x = veorq_u8(v1, v2);
+-         vst1q_u8(r + i, x);
+-     }
+--#if defined(__IAR_SYSTEMS_ICC__)
+-+#if defined(__IAR_SYSTEMS_ICC__) || (defined(MBEDTLS_COMPILER_IS_GCC) && MBEDTLS_GCC_VERSION >= 140100)
+-     /* This if statement helps some compilers (e.g., IAR) optimise out the byte-by-byte tail case
+-      * where n is a constant multiple of 16.
+-      * For other compilers (e.g. recent gcc and clang) it makes no difference if n is a compile-time

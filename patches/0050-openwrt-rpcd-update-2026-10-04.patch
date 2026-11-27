@@ -1,0 +1,75 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] rpcd: update to Git HEAD (2026-10-04)
+SPDX-License-Identifier: GPL-2.0-only
+
+Take rpcd from openwrt-25.12 (d9178efb38, Git HEAD 2026-10-04, d99f703)
+instead of 25.12.3's 2025-12-03 (ffb9961). The upstream range includes,
+among others: file: re-authorize the ACL against the resolved path
+(symlink bypass, e37ed9d), file: no uninitialized stack memory for
+broken symlinks (ab6549a), rc: list name filter use-after-free (0de6668),
+exec: async reply teardown use-after-free (e655a0d), plugin: snprintf in
+the ubus lookup callback (680705e), integer overflow fixes in session
+timeouts and uci apply timeouts, and session: stop naming runtime files
+after the session id (d99f703). rpcd is what LuCI calls over ubus.
+
+TIP's 100-guard-he-eht-fields.patch is replaced by the refresh TIP made
+for this rpcd source in v5.2.0-rc1 (33718fbf, patch 0133); the old one
+does not apply to it.
+
+---
+ package/system/rpcd/Makefile                    |  6 +++---
+ .../rpcd/patches/100-guard-he-eht-fields.patch  | 17 +++++------------
+ 2 files changed, 8 insertions(+), 15 deletions(-)
+
+diff --git a/package/system/rpcd/Makefile b/package/system/rpcd/Makefile
+index 593eb3a..0c6f6d0 100644
+--- a/package/system/rpcd/Makefile
++++ b/package/system/rpcd/Makefile
+@@ -12,9 +12,9 @@ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/rpcd.git
+-PKG_MIRROR_HASH:=1a701b15746f34eb19532f195d738611364a18acaf45c0197626c31ab59976ce
+-PKG_SOURCE_DATE:=2025-12-03
+-PKG_SOURCE_VERSION:=ffb9961c1f8bc50830fdd4e144570f11062c2601
++PKG_MIRROR_HASH:=01eed566d6d5f54460225ccfa93a572bca66ca8b1458b947060bf00d360f65b4
++PKG_SOURCE_DATE:=2026-10-04
++PKG_SOURCE_VERSION:=d99f703e4035d03fbcfbada3cb697db346c2b984
+ PKG_MAINTAINER:=Jo-Philipp Wich <jo@mein.io>
+ 
+ PKG_LICENSE:=ISC
+diff --git a/package/system/rpcd/patches/100-guard-he-eht-fields.patch b/package/system/rpcd/patches/100-guard-he-eht-fields.patch
+index adff890..15967c4 100644
+--- a/package/system/rpcd/patches/100-guard-he-eht-fields.patch
++++ b/package/system/rpcd/patches/100-guard-he-eht-fields.patch
+@@ -1,25 +1,18 @@
+ --- a/iwinfo.c
+ +++ b/iwinfo.c
+-@@ -437,20 +437,22 @@
++@@ -437,6 +437,7 @@ rpc_iwinfo_scan(struct ubus_context *ctx, struct ubus_object *obj,
+  				blobmsg_close_table(&buf, t);
+  			}
+-
++ 
+ +#ifdef IWINFO_HAS_EHT_CHAN_INFO
+  			if (e->he_chan_info.center_chan_1) {
+  				t = blobmsg_open_table(&buf, "he_operation");
+  				blobmsg_add_u32(&buf, "channel_width", eht_chan_width[e->he_chan_info.chan_width]);
+- 				blobmsg_add_u32(&buf, "center_freq_1", e->he_chan_info.center_chan_1);
+- 				blobmsg_add_u32(&buf, "center_freq_2", e->he_chan_info.center_chan_2);
+- 				blobmsg_close_table(&buf, t);
+- 			}
+-
+- 			if (e->eht_chan_info.center_chan_1) {
+- 				t = blobmsg_open_table(&buf, "eht_operation");
+- 				blobmsg_add_u32(&buf, "channel_width", eht_chan_width[e->eht_chan_info.chan_width]);
+- 				blobmsg_add_u32(&buf, "center_freq_1", e->eht_chan_info.center_chan_1);
++@@ -452,6 +453,7 @@ rpc_iwinfo_scan(struct ubus_context *ctx, struct ubus_object *obj,
+  				blobmsg_add_u32(&buf, "center_freq_2", e->eht_chan_info.center_chan_2);
+  				blobmsg_close_table(&buf, t);
+  			}
+ +#endif
+-
++ 
+  			rpc_iwinfo_add_encryption("encryption", &e->crypto);
++ 

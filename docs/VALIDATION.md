@@ -12,7 +12,122 @@ a normal reboot and a new live acceptance run. The source now provides a
 fail-closed `nwa50be-sysupgrade` wrapper; that wrapper itself has automated
 coverage but has not been used for another live flash.
 
-## Latest unflashed artifact checks
+## Installed image: 2026-11-27
+
+The `v5.1.1` image built on 2026-11-27, with patches up to 0063, was
+installed on the validation AP the same day through the flash guard: a fresh
+`sysupgrade -b` backup, a guard generated for exactly that image and backup
+(14 of 14 offline guard cases passed), an on-device comparison of the nine
+required files with the backup, `sysupgrade -T`, then the guarded upgrade.
+The AP answered on SSH again 72 seconds after the session closed.
+
+After the flash:
+
+- The kernel and root filesystem volumes hash to the image's kernel and root
+  members. Kernel 6.6.88 runs with 146 modules loaded and no oops or warning
+  in the kernel log.
+- Host name, LAN address, the recorded management address, every interface
+  MAC address, the SSH host keys and the eight checked configuration and
+  state files are as in the backup. The same three first-boot scripts remain
+  as on the previous image.
+- `scripts/check-live-management-gate.sh` passes. dropbear listens on the
+  LAN address only, with password login off, and uhttpd runs with
+  `-n 3 -W 3`.
+- All three BSSs are up in EHT modes, and the eight clients present before
+  the flash were associated again within a minute of boot.
+- LuCI answers its login page over HTTPS from the wired administrator host,
+  alone and for eight parallel requests; port 80 is closed.
+- `hostapd -v11be` exits 0, and LuCI's feature list reports 11be.
+
+Vantage 1.2.1 was installed afterwards from its signed feed, outside the
+build chain. The wireless-side capture of the management gate described
+below ran on the previous image, which has the same gate include; it has not
+been repeated on this one.
+
+## Live management gate check: 2026-11-27
+
+On the installed unit (the `v5.1.1-rc1` image, installed 2026-10-31),
+`scripts/check-live-management-gate.sh` passed, and an on-device capture of
+packet headers watched a phone request the HTTPS management address:
+
+- From the SSID bridged onto the management segment: the address lookup was
+  answered, 17 SYNs over two connection attempts arrived on the radio port
+  and on `br-lan`, and the AP sent no TCP reply.
+- From an SSID on another VLAN: the upstream router forwarded the request,
+  it arrived on `eth0`, and the fw4 address allowlist refused it with a TCP
+  reset.
+
+The first result is the gate. The second is outside it; see the scope note
+in [SECURITY.md](SECURITY.md#installed-unit-state-october-2026). No
+forged-source traffic was sent: the gate rule does not match on the source
+address.
+
+## Artifact checks
+
+On 2026-11-27, patches 0061 to 0063 and the uhttpd per-source setting were
+added. The kernel build directory was removed and the kernel, every kernel
+module and the images were rebuilt in the same tree. `scripts/build.sh` and
+`scripts/verify-artifacts.sh` passed for all four NWA50BE images (230 PEBs,
+30,146,560-byte UBI). The first build attempt stopped in `qca-nss-ppe-ds`,
+which compiled before `qca-nss-ppe-vp` had staged a header it includes; the
+second run completed. Checked on the result:
+
+- The kernel packed in the sysupgrade image is the `Image` built in the
+  tree, and its device tree is byte-identical to the installed image's.
+- Against the build of the day before, the root filesystem differs in
+  `/usr/sbin/wpad`, `luci-mod-network.json`, the first-boot script, the
+  package database, and the build time stamped into `qca-ssdk.ko` and
+  `ssdk_sh`. All other kernel modules are byte-identical, and every module
+  resolves the symbols it needs against the new kernel or another module.
+- Run under user-mode emulation, `hostapd -v11be` exits 0 where the earlier
+  binary exited 1; the artifact verifier now asks the packaged binary.
+
+Rehearsed on the validation AP in RAM, without installing: the image's files
+were unpacked into the RAM disk, a fresh `sysupgrade -b` backup restored
+over them, and the first-boot scripts run there as an unprivileged account.
+The management state was recognised, the enabled services came out identical
+to the running system's (44 links), and network, wireless, firewall and
+dropbear configuration were unchanged; uhttpd gained only
+`max_requests_per_source`. `fw4 print` with the new tools rendered the same
+145 lines as the running system. On a private bus the new rpcd allowed the
+bridge port and `/bin/ping6` reads that 0063 grants and refused unrelated
+files, uhttpd answered 24 parallel LuCI requests, and the new dropbear
+accepted the key login with the existing host keys. Afterwards the unit's
+ruleset, the hash of its `/etc`, its mounts and its service PIDs were as
+before.
+
+Tested in QEMU's generic arm64 machine, not on NWA50BE hardware: the kernel
+with 0062 completed 296,870 TCP connections against listeners that stayed up
+with no failure. The same multi-segment test on the kernel without 0062
+produced 32 resets during establishment in 107,800 connections, when
+consecutive segments of one connection were delivered to two CPUs over a
+bonded link. UDP, VLAN (including VLAN 0 tags), nftables with the gate file,
+listener migration and CPU-timer load ran without a kernel warning, the
+image's kernel modules loaded, and the image's own init reached "init
+complete" and stayed up. The hardware offload path, the Wi-Fi and switch
+drivers, and the bootloader hand-over are not covered by any of this.
+
+This artifact was installed on the validation AP the same day; see
+"Installed image: 2026-11-27" above.
+
+On 2026-11-26, the `v5.1.1` update with patches 0050 to 0060 received a
+fresh preparation of the pinned tree and a full tools, toolchain, kernel and
+package build. `scripts/build.sh` and `scripts/verify-artifacts.sh` passed
+for all four NWA50BE images (230 PEBs, 30,146,560-byte UBI). The new kernel
+patches were also applied in `patch-kernel.sh` order to a 6.6.88 source with
+TIP's 934 patches, at fuzz 0. The image labels read `v5.1.1`, commit
+`f18e1f56`, and schema `e293493`. This artifact has not been installed on the
+validation AP.
+
+On 2026-10-28, the `v5.1.1-rc1` update received a fresh
+source/toolchain/kernel/package build from a new preparation of the pinned
+tree. The image set, built from the 22 existing patches, passed
+`scripts/build.sh` and `scripts/verify-artifacts.sh` for all four NWA50BE images (230 PEBs, 30,146,560-byte UBI, the same
+geometry as the September build), the prepared-source fingerprint passed
+again after the build, the image labels read `v5.1.1-rc1`, commit
+`20561633`, schema `e293493`, and uCentral 5.1.1. The built
+kernel enables pstore RAM logging (see [BUILD.md](BUILD.md)). The artifact
+remains private and has not been installed on the validation AP.
 
 On 2026-09-17, the `v5.1.0` update received a fresh source/toolchain/kernel/package
 build, followed by a metadata-correction rebuild. The first image set was
@@ -37,8 +152,9 @@ private and has not been installed on the validation AP. The verifier:
   pass a configuration backup with `sysupgrade -f`;
 - byte-compares both cloud-provisioning overrides and the wired-ingress guard
   against the reviewed overlay;
-- requires the exact TIP `v5.1.0` label, commit prefix, schema revision, and
-  uCentral version metadata, plus byte-exact packaged hostapd shell support;
+- requires the exact TIP label (`v5.1.1` for the current pin), commit
+  prefix, schema revision, and uCentral version metadata, plus byte-exact
+  packaged hostapd shell support;
 - executes the six-case lock/BH regression against the actual generated ath12k
   collision block; prepared-tree verification also runs five real-Git
   version-label cases;

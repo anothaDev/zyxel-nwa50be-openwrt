@@ -1,0 +1,1032 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] ipq53xx: backport kernel network fixes to 6.6.88
+SPDX-License-Identifier: GPL-2.0-only
+
+The ipq53xx kernel stays at 6.6.88 and gets no 6.6.y updates. Add:
+
+  0964, 0965  TIP's own backports from v5.2.0-rc1 (bd829c10): nf_tables
+              use-after-free in nf_tables_addchain() (CVE-2026-23231) and
+              the posix-cpu-timers race (CVE-2025-38352, CISA KEV; not
+              reachable with POSIX_CPU_TIMERS_TASK_WORK=y)
+  901-908     CVE-2026-99288: a SYN flood to a listening port can make
+              the established-socket lookup pick up a socket that is not
+              hashed yet and dereference a NULL rsk_listener; with
+              PANIC_ON_OOPS=y that reboots the AP from the LAN. 908 is
+              the fix (6.6.y cedc85d95ce0, refreshed for offsets only);
+              901, 902 and 907 are the earlier 6.6.y fixes its TCP Fast
+              Open and request-timer hunks build on (CVE-2025-39955,
+              CVE-2025-40186, CVE-2026-99270)
+  903         CVE-2026-98255: old ACKs no longer advance the window on
+              the TCP fast path (RFC 5961 check)
+  904         CVE-2026-98532: ipv6_find_hdr() cannot return an offset
+              past the packet
+  905, 906    CVE-2026-99077, CVE-2026-99076: UDP PMTU and redirect
+              exceptions are created before socket matching, so the
+              result no longer depends on whether a socket matched
+  909         CVE-2026-99805: bounded VLAN-0 tag stripping
+
+All are linux-6.6.y stable commits with their headers kept. In
+patch-kernel.sh order they apply on 6.6.88 with TIP's 934 patches and
+900 (0046) at fuzz 0; none touches a file another patch here changes.
+
+---
+ ...use-after-free-in-nf_tables_addchain.patch |  51 +++++
+ ...x_cpu_timers-and-posix_cpu_timer_del.patch |  58 ++++++
+ ...sk-sk-fastopen-rsk-in-tcp-disconnect.patch |  92 +++++++++
+ ...-don-t-call-reqsk-fastopen-remove-in.patch |  86 ++++++++
+ ...-exclude-old-acks-from-tcp-fast-path.patch |  61 ++++++
+ ...6-find-hdr-return-an-offset-past-the.patch |  74 +++++++
+ ...te-exceptions-before-socket-matching.patch |  88 ++++++++
+ ...te-exceptions-before-socket-matching.patch |  99 +++++++++
+ ...potential-uaf-in-reqsk-timer-handler.patch |  47 +++++
+ ...d-sockets-during-established-lookups.patch | 188 ++++++++++++++++++
+ ...-net-limit-priority-vlan-untag-depth.patch |  77 +++++++
+ 11 files changed, 921 insertions(+)
+
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/0964-netfilter-nf_tables-fix-use-after-free-in-nf_tables_addchain.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/0964-netfilter-nf_tables-fix-use-after-free-in-nf_tables_addchain.patch
+new file mode 100644
+index 0000000..fdc9960
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/0964-netfilter-nf_tables-fix-use-after-free-in-nf_tables_addchain.patch
+@@ -0,0 +1,51 @@
++From 7017745068a9068904e1e7a1b170a5785647cc81 Mon Sep 17 00:00:00 2001
++From: Inseo An <y0un9sa@gmail.com>
++Date: Tue, 17 Feb 2026 21:14:40 +0900
++Subject: netfilter: nf_tables: fix use-after-free in nf_tables_addchain()
++
++[ Upstream commit 71e99ee20fc3f662555118cf1159443250647533 ]
++
++nf_tables_addchain() publishes the chain to table->chains via
++list_add_tail_rcu() (in nft_chain_add()) before registering hooks.
++If nf_tables_register_hook() then fails, the error path calls
++nft_chain_del() (list_del_rcu()) followed by nf_tables_chain_destroy()
++with no RCU grace period in between.
++
++This creates two use-after-free conditions:
++
++ 1) Control-plane: nf_tables_dump_chains() traverses table->chains
++    under rcu_read_lock(). A concurrent dump can still be walking
++    the chain when the error path frees it.
++
++ 2) Packet path: for NFPROTO_INET, nf_register_net_hook() briefly
++    installs the IPv4 hook before IPv6 registration fails.  Packets
++    entering nft_do_chain() via the transient IPv4 hook can still be
++    dereferencing chain->blob_gen_X when the error path frees the
++    chain.
++
++Add synchronize_rcu() between nft_chain_del() and the chain destroy
++so that all RCU readers -- both dump threads and in-flight packet
++evaluation -- have finished before the chain is freed.
++
++Fixes: 91c7b38dc9f0 ("netfilter: nf_tables: use new transaction infrastructure to handle chain")
++Signed-off-by: Inseo An <y0un9sa@gmail.com>
++Signed-off-by: Florian Westphal <fw@strlen.de>
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/netfilter/nf_tables_api.c | 1 +
++ 1 file changed, 1 insertion(+)
++
++diff --git a/net/netfilter/nf_tables_api.c b/net/netfilter/nf_tables_api.c
++index 8532d832aad6a..41614e897ec8f 100644
++--- a/net/netfilter/nf_tables_api.c
+++++ b/net/netfilter/nf_tables_api.c
++@@ -2581,6 +2581,7 @@ static int nf_tables_addchain(struct nft_ctx *ctx, u8 family, u8 genmask,
++ 
++ err_register_hook:
++ 	nft_chain_del(chain);
+++	synchronize_rcu();
++ err_chain_add:
++ 	nft_trans_destroy(trans);
++ err_trans:
++-- 
++2.34.1
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/0965-posix-cpu-timers-fix-race-between-handle_posix_cpu_timers-and-posix_cpu_timer_del.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/0965-posix-cpu-timers-fix-race-between-handle_posix_cpu_timers-and-posix_cpu_timer_del.patch
+new file mode 100644
+index 0000000..dfcfaed
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/0965-posix-cpu-timers-fix-race-between-handle_posix_cpu_timers-and-posix_cpu_timer_del.patch
+@@ -0,0 +1,58 @@
++From 2c72fe18cc5f9f1750f5bc148cf1c94c29e106ff Mon Sep 17 00:00:00 2001
++From: Oleg Nesterov <oleg@redhat.com>
++Date: Fri, 13 Jun 2025 19:26:50 +0200
++Subject: posix-cpu-timers: fix race between handle_posix_cpu_timers() and
++ posix_cpu_timer_del()
++MIME-Version: 1.0
++Content-Type: text/plain; charset=UTF-8
++Content-Transfer-Encoding: 8bit
++
++commit f90fff1e152dedf52b932240ebbd670d83330eca upstream.
++
++If an exiting non-autoreaping task has already passed exit_notify() and
++calls handle_posix_cpu_timers() from IRQ, it can be reaped by its parent
++or debugger right after unlock_task_sighand().
++
++If a concurrent posix_cpu_timer_del() runs at that moment, it won't be
++able to detect timer->it.cpu.firing != 0: cpu_timer_task_rcu() and/or
++lock_task_sighand() will fail.
++
++Add the tsk->exit_state check into run_posix_cpu_timers() to fix this.
++
++This fix is not needed if CONFIG_POSIX_CPU_TIMERS_TASK_WORK=y, because
++exit_task_work() is called before exit_notify(). But the check still
++makes sense, task_work_add(&tsk->posix_cputimers_work.work) will fail
++anyway in this case.
++
++Cc: stable@vger.kernel.org
++Reported-by: Benoît Sevens <bsevens@google.com>
++Fixes: 0bdd2ed4138e ("sched: run_posix_cpu_timers: Don't check ->exit_state, use lock_task_sighand()")
++Signed-off-by: Oleg Nesterov <oleg@redhat.com>
++Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
++Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
++---
++ kernel/time/posix-cpu-timers.c | 9 +++++++++
++ 1 file changed, 9 insertions(+)
++
++diff --git a/kernel/time/posix-cpu-timers.c b/kernel/time/posix-cpu-timers.c
++index e9c6f9d0e42ce..9af1f2a72a0ab 100644
++--- a/kernel/time/posix-cpu-timers.c
+++++ b/kernel/time/posix-cpu-timers.c
++@@ -1437,6 +1437,15 @@ void run_posix_cpu_timers(void)
++ 
++ 	lockdep_assert_irqs_disabled();
++ 
+++	/*
+++	 * Ensure that release_task(tsk) can't happen while
+++	 * handle_posix_cpu_timers() is running. Otherwise, a concurrent
+++	 * posix_cpu_timer_del() may fail to lock_task_sighand(tsk) and
+++	 * miss timer->it.cpu.firing != 0.
+++	 */
+++	if (tsk->exit_state)
+++		return;
+++
++ 	/*
++ 	 * If the actual expiry is deferred to task work context and the
++ 	 * work is already scheduled there is no point to do anything here.
++-- 
++2.34.1
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/901-tcp-clear-tcp-sk-sk-fastopen-rsk-in-tcp-disconnect.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/901-tcp-clear-tcp-sk-sk-fastopen-rsk-in-tcp-disconnect.patch
+new file mode 100644
+index 0000000..d67c90e
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/901-tcp-clear-tcp-sk-sk-fastopen-rsk-in-tcp-disconnect.patch
+@@ -0,0 +1,92 @@
++From dfd06131107e7b699ef1e2a24ed2f7d17c917753 Mon Sep 17 00:00:00 2001
++From: Kuniyuki Iwashima <kuniyu@google.com>
++Date: Mon, 15 Sep 2025 17:56:46 +0000
++Subject: [PATCH] tcp: Clear tcp_sk(sk)->fastopen_rsk in tcp_disconnect().
++
++[ Upstream commit 45c8a6cc2bcd780e634a6ba8e46bffbdf1fc5c01 ]
++
++syzbot reported the splat below where a socket had tcp_sk(sk)->fastopen_rsk
++in the TCP_ESTABLISHED state. [0]
++
++syzbot reused the server-side TCP Fast Open socket as a new client before
++the TFO socket completes 3WHS:
++
++  1. accept()
++  2. connect(AF_UNSPEC)
++  3. connect() to another destination
++
++As of accept(), sk->sk_state is TCP_SYN_RECV, and tcp_disconnect() changes
++it to TCP_CLOSE and makes connect() possible, which restarts timers.
++
++Since tcp_disconnect() forgot to clear tcp_sk(sk)->fastopen_rsk, the
++retransmit timer triggered the warning and the intended packet was not
++retransmitted.
++
++Let's call reqsk_fastopen_remove() in tcp_disconnect().
++
++[0]:
++WARNING: CPU: 2 PID: 0 at net/ipv4/tcp_timer.c:542 tcp_retransmit_timer (net/ipv4/tcp_timer.c:542 (discriminator 7))
++Modules linked in:
++CPU: 2 UID: 0 PID: 0 Comm: swapper/2 Not tainted 6.17.0-rc5-g201825fb4278 #62 PREEMPT(voluntary)
++Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
++RIP: 0010:tcp_retransmit_timer (net/ipv4/tcp_timer.c:542 (discriminator 7))
++Code: 41 55 41 54 55 53 48 8b af b8 08 00 00 48 89 fb 48 85 ed 0f 84 55 01 00 00 0f b6 47 12 3c 03 74 0c 0f b6 47 12 3c 04 74 04 90 <0f> 0b 90 48 8b 85 c0 00 00 00 48 89 ef 48 8b 40 30 e8 6a 4f 06 3e
++RSP: 0018:ffffc900002f8d40 EFLAGS: 00010293
++RAX: 0000000000000002 RBX: ffff888106911400 RCX: 0000000000000017
++RDX: 0000000002517619 RSI: ffffffff83764080 RDI: ffff888106911400
++RBP: ffff888106d5c000 R08: 0000000000000001 R09: ffffc900002f8de8
++R10: 00000000000000c2 R11: ffffc900002f8ff8 R12: ffff888106911540
++R13: ffff888106911480 R14: ffff888106911840 R15: ffffc900002f8de0
++FS:  0000000000000000(0000) GS:ffff88907b768000(0000) knlGS:0000000000000000
++CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
++CR2: 00007f8044d69d90 CR3: 0000000002c30003 CR4: 0000000000370ef0
++Call Trace:
++ <IRQ>
++ tcp_write_timer (net/ipv4/tcp_timer.c:738)
++ call_timer_fn (kernel/time/timer.c:1747)
++ __run_timers (kernel/time/timer.c:1799 kernel/time/timer.c:2372)
++ timer_expire_remote (kernel/time/timer.c:2385 kernel/time/timer.c:2376 kernel/time/timer.c:2135)
++ tmigr_handle_remote_up (kernel/time/timer_migration.c:944 kernel/time/timer_migration.c:1035)
++ __walk_groups.isra.0 (kernel/time/timer_migration.c:533 (discriminator 1))
++ tmigr_handle_remote (kernel/time/timer_migration.c:1096)
++ handle_softirqs (./arch/x86/include/asm/jump_label.h:36 ./include/trace/events/irq.h:142 kernel/softirq.c:580)
++ irq_exit_rcu (kernel/softirq.c:614 kernel/softirq.c:453 kernel/softirq.c:680 kernel/softirq.c:696)
++ sysvec_apic_timer_interrupt (arch/x86/kernel/apic/apic.c:1050 (discriminator 35) arch/x86/kernel/apic/apic.c:1050 (discriminator 35))
++ </IRQ>
++
++Fixes: 8336886f786f ("tcp: TCP Fast Open Server - support TFO listeners")
++Reported-by: syzkaller <syzkaller@googlegroups.com>
++Signed-off-by: Kuniyuki Iwashima <kuniyu@google.com>
++Link: https://patch.msgid.link/20250915175800.118793-2-kuniyu@google.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/ipv4/tcp.c | 5 +++++
++ 1 file changed, 5 insertions(+)
++
++diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
++index a4bbe959d..40a2f172b 100644
++--- a/net/ipv4/tcp.c
+++++ b/net/ipv4/tcp.c
++@@ -3011,6 +3011,7 @@ int tcp_disconnect(struct sock *sk, int flags)
++ 	struct inet_connection_sock *icsk = inet_csk(sk);
++ 	struct tcp_sock *tp = tcp_sk(sk);
++ 	int old_state = sk->sk_state;
+++	struct request_sock *req;
++ 	u32 seq;
++ 
++ 	if (old_state != TCP_CLOSE)
++@@ -3121,6 +3122,10 @@ int tcp_disconnect(struct sock *sk, int flags)
++ 
++ 
++ 	/* Clean up fastopen related fields */
+++	req = rcu_dereference_protected(tp->fastopen_rsk,
+++					lockdep_sock_is_held(sk));
+++	if (req)
+++		reqsk_fastopen_remove(sk, req, false);
++ 	tcp_free_fastopen_req(tp);
++ 	inet_clear_bit(DEFER_CONNECT, sk);
++ 	tp->fastopen_client_fail = 0;
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/902-tcp-don-t-call-reqsk-fastopen-remove-in.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/902-tcp-don-t-call-reqsk-fastopen-remove-in.patch
+new file mode 100644
+index 0000000..3138dca
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/902-tcp-don-t-call-reqsk-fastopen-remove-in.patch
+@@ -0,0 +1,86 @@
++From 422c1c173c39bbbae1e0eaaf8aefe40b2596233b Mon Sep 17 00:00:00 2001
++From: Kuniyuki Iwashima <kuniyu@google.com>
++Date: Wed, 1 Oct 2025 23:37:54 +0000
++Subject: [PATCH] tcp: Don't call reqsk_fastopen_remove() in
++ tcp_conn_request().
++
++[ Upstream commit 2e7cbbbe3d61c63606994b7ff73c72537afe2e1c ]
++
++syzbot reported the splat below in tcp_conn_request(). [0]
++
++If a listener is close()d while a TFO socket is being processed in
++tcp_conn_request(), inet_csk_reqsk_queue_add() does not set reqsk->sk
++and calls inet_child_forget(), which calls tcp_disconnect() for the
++TFO socket.
++
++After the cited commit, tcp_disconnect() calls reqsk_fastopen_remove(),
++where reqsk_put() is called due to !reqsk->sk.
++
++Then, reqsk_fastopen_remove() in tcp_conn_request() decrements the
++last req->rsk_refcnt and frees reqsk, and __reqsk_free() at the
++drop_and_free label causes the refcount underflow for the listener
++and double-free of the reqsk.
++
++Let's remove reqsk_fastopen_remove() in tcp_conn_request().
++
++Note that other callers make sure tp->fastopen_rsk is not NULL.
++
++[0]:
++refcount_t: underflow; use-after-free.
++WARNING: CPU: 12 PID: 5563 at lib/refcount.c:28 refcount_warn_saturate (lib/refcount.c:28)
++Modules linked in:
++CPU: 12 UID: 0 PID: 5563 Comm: syz-executor Not tainted syzkaller #0 PREEMPT(full)
++Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 07/12/2025
++RIP: 0010:refcount_warn_saturate (lib/refcount.c:28)
++Code: ab e8 8e b4 98 ff 0f 0b c3 cc cc cc cc cc 80 3d a4 e4 d6 01 00 75 9c c6 05 9b e4 d6 01 01 48 c7 c7 e8 df fb ab e8 6a b4 98 ff <0f> 0b e9 03 5b 76 00 cc 80 3d 7d e4 d6 01 00 0f 85 74 ff ff ff c6
++RSP: 0018:ffffa79fc0304a98 EFLAGS: 00010246
++RAX: d83af4db1c6b3900 RBX: ffff9f65c7a69020 RCX: d83af4db1c6b3900
++RDX: 0000000000000000 RSI: 00000000ffff7fff RDI: ffffffffac78a280
++RBP: 000000009d781b60 R08: 0000000000007fff R09: ffffffffac6ca280
++R10: 0000000000017ffd R11: 0000000000000004 R12: ffff9f65c7b4f100
++R13: ffff9f65c7d23c00 R14: ffff9f65c7d26000 R15: ffff9f65c7a64ef8
++FS:  00007f9f962176c0(0000) GS:ffff9f65fcf00000(0000) knlGS:0000000000000000
++CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
++CR2: 0000200000000180 CR3: 000000000dbbe006 CR4: 0000000000372ef0
++Call Trace:
++ <IRQ>
++ tcp_conn_request (./include/linux/refcount.h:400 ./include/linux/refcount.h:432 ./include/linux/refcount.h:450 ./include/net/sock.h:1965 ./include/net/request_sock.h:131 net/ipv4/tcp_input.c:7301)
++ tcp_rcv_state_process (net/ipv4/tcp_input.c:6708)
++ tcp_v6_do_rcv (net/ipv6/tcp_ipv6.c:1670)
++ tcp_v6_rcv (net/ipv6/tcp_ipv6.c:1906)
++ ip6_protocol_deliver_rcu (net/ipv6/ip6_input.c:438)
++ ip6_input (net/ipv6/ip6_input.c:500)
++ ipv6_rcv (net/ipv6/ip6_input.c:311)
++ __netif_receive_skb (net/core/dev.c:6104)
++ process_backlog (net/core/dev.c:6456)
++ __napi_poll (net/core/dev.c:7506)
++ net_rx_action (net/core/dev.c:7569 net/core/dev.c:7696)
++ handle_softirqs (kernel/softirq.c:579)
++ do_softirq (kernel/softirq.c:480)
++ </IRQ>
++
++Fixes: 45c8a6cc2bcd ("tcp: Clear tcp_sk(sk)->fastopen_rsk in tcp_disconnect().")
++Reported-by: syzkaller <syzkaller@googlegroups.com>
++Signed-off-by: Kuniyuki Iwashima <kuniyu@google.com>
++Link: https://patch.msgid.link/20251001233755.1340927-1-kuniyu@google.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/ipv4/tcp_input.c | 1 -
++ 1 file changed, 1 deletion(-)
++
++diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
++index c6d00817a..8834cd41b 100644
++--- a/net/ipv4/tcp_input.c
+++++ b/net/ipv4/tcp_input.c
++@@ -7200,7 +7200,6 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
++ 				    &foc, TCP_SYNACK_FASTOPEN, skb);
++ 		/* Add the child socket directly into the accept queue */
++ 		if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {
++-			reqsk_fastopen_remove(fastopen_sk, req, false);
++ 			bh_unlock_sock(fastopen_sk);
++ 			sock_put(fastopen_sk);
++ 			goto drop_and_free;
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/903-tcp-exclude-old-acks-from-tcp-fast-path.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/903-tcp-exclude-old-acks-from-tcp-fast-path.patch
+new file mode 100644
+index 0000000..6ad62e5
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/903-tcp-exclude-old-acks-from-tcp-fast-path.patch
+@@ -0,0 +1,61 @@
++From 1c8448db5cf35a13d82b0c9004ffdb49358883e7 Mon Sep 17 00:00:00 2001
++From: Inbal Schussheim <inbal.lipshtat@mail.huji.ac.il>
++Date: Mon, 14 Sep 2026 12:04:07 +0300
++Subject: [PATCH] tcp: exclude old ACKs from tcp fast path
++
++commit f81e6c3fb06327bc49cdd6e559845293ba06a704 upstream.
++
++Exclude old ACKs before SND.UNA from the tcp fast path
++as well as ACKs after SND.NXT.
++
++Such ACKs will fall through to the slow path, where tcp_ack()
++performs the appropriate validation and challenge ACK handling
++according to RFC5961 and Commit 3d501dd326fb1c7 ("tcp: do not
++accept ACK of bytes we never sent").
++
++This prevents old ACKs from being accepted
++or modifying connection state as part of the fast path before
++appropriate ACK validation is applied.
++In particular, this prevents payload carried by a segment with
++an excessively old ACK from advancing RCV.NXT before the ACK
++is rejected.
++
++Fixes: 31770e34e43d ("tcp: Revert "tcp: remove header prediction"")
++Reported-by: Amit Klein <amit.klein@mail.huji.ac.il>
++Reported-by: Tamir Shahar <tamir.shahar1@mail.huji.ac.il>
++Reported-by: Inbal Schussheim <inbal.lipshtat@mail.huji.ac.il>
++Suggested-by: Eric Dumazet <edumazet@google.com>
++Cc: stable@vger.kernel.org
++Signed-off-by: Inbal Schussheim <inbal.lipshtat@mail.huji.ac.il>
++Reviewed-by: Eric Dumazet <edumazet@google.com>
++Link: https://patch.msgid.link/20260914090408.1435080-2-inbal.lipshtat@mail.huji.ac.il
++Signed-off-by: Paolo Abeni <pabeni@redhat.com>
++Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
++---
++ net/ipv4/tcp_input.c | 3 ++-
++ 1 file changed, 2 insertions(+), 1 deletion(-)
++
++diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
++index 1a0dd36d5..89ef6ed7f 100644
++--- a/net/ipv4/tcp_input.c
+++++ b/net/ipv4/tcp_input.c
++@@ -6029,6 +6029,7 @@ reset:
++  *	  or pure receivers (this means either the sequence number or the ack
++  *	  value must stay constant)
++  *	- Unexpected TCP option.
+++ *	- ACK sequence number is outside [SND.UNA, SND.NXT].
++  *
++  *	When these conditions are not satisfied it drops into a standard
++  *	receive procedure patterned after RFC793 to handle all cases.
++@@ -6077,7 +6078,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
++ 
++ 	if ((tcp_flag_word(th) & TCP_HP_BITS) == tp->pred_flags &&
++ 	    TCP_SKB_CB(skb)->seq == tp->rcv_nxt &&
++-	    !after(TCP_SKB_CB(skb)->ack_seq, tp->snd_nxt)) {
+++	    between(TCP_SKB_CB(skb)->ack_seq, tp->snd_una, tp->snd_nxt)) {
++ 		int tcp_header_len = tp->tcp_header_len;
++ 
++ 		/* Timestamp header prediction: tcp_header_len
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/904-ipv6-do-not-let-ipv6-find-hdr-return-an-offset-past-the.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/904-ipv6-do-not-let-ipv6-find-hdr-return-an-offset-past-the.patch
+new file mode 100644
+index 0000000..30cd913
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/904-ipv6-do-not-let-ipv6-find-hdr-return-an-offset-past-the.patch
+@@ -0,0 +1,74 @@
++From dc92cb972e86790b8078337ec41015b748b8f8e5 Mon Sep 17 00:00:00 2001
++From: Norbert Szetei <norbert@doyensec.com>
++Date: Wed, 16 Sep 2026 21:57:53 +0200
++Subject: [PATCH] ipv6: do not let ipv6_find_hdr() return an offset past the
++ packet end
++
++commit ee319bd3a0e976af5087cbe59ebc50a66f31d202 upstream.
++
++ipv6_find_hdr() walks the extension header chain, skipping each header by
++the length that header itself declares.  ipv6_optlen() returns up to 2048,
++and the skip is never checked against skb->len, so the offset stored in
++*offset can point past the end of the packet.
++
++openvswitch installs that offset as the transport header, and
++update_ipv6_checksum() then reads and writes the transport checksum field
++out of bounds:
++
++  BUG: KASAN: slab-use-after-free in inet_proto_csum_replace16+0x445/0x470
++  Read of size 2 at addr ffff88810b754b06 by task ovs_ipv6_oob/629
++  CPU: 4 UID: 1000 PID: 629 Comm: ovs_ipv6_oob Tainted: G N 7.3.0-rc3+ #348
++  Call Trace:
++   inet_proto_csum_replace16+0x445/0x470
++   set_ipv6_addr+0x3dd/0x460
++   do_execute_actions+0x6a3d/0x7c40
++   ovs_execute_actions+0xfd/0x480
++   ovs_packet_cmd_execute+0xc38/0xf20
++   genl_rcv_msg+0x59e/0x870
++   netlink_rcv_skb+0x18b/0x450
++   genl_rcv+0x2d/0x40
++   netlink_unicast+0x6bc/0xa20
++
++  The buggy address belongs to the object at ffff88810b754980
++   which belongs to the cache skbuff_small_head of size 704
++  The buggy address is located 390 bytes inside of
++   freed 704-byte region [ffff88810b754980, ffff88810b754c40)
++
++Other callers use that offset too, so bound it here rather than in one
++caller.
++
++Reject a header whose declared length does not fit in the packet.
++ipv6_find_hdr() already fails with -EBADMSG on a malformed chain, so this
++adds no new failure mode.
++
++Fixes: f8f626754ebe ("ipv6: Move ipv6_find_hdr() out of Netfilter code.")
++Suggested-by: Ilya Maximets <i.maximets@ovn.org>
++Suggested-by: Eric Dumazet <edumazet@google.com>
++Cc: stable@vger.kernel.org
++Signed-off-by: Norbert Szetei <norbert@doyensec.com>
++Reviewed-by: Ido Schimmel <idosch@nvidia.com>
++Reviewed-by: Ilya Maximets <i.maximets@ovn.org>
++Link: https://patch.msgid.link/8F80BA1A-DDFD-432D-9075-242A3435FEB5@doyensec.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
++---
++ net/ipv6/exthdrs_core.c | 3 +++
++ 1 file changed, 3 insertions(+)
++
++diff --git a/net/ipv6/exthdrs_core.c b/net/ipv6/exthdrs_core.c
++index 49e31e4ae..ce3724f49 100644
++--- a/net/ipv6/exthdrs_core.c
+++++ b/net/ipv6/exthdrs_core.c
++@@ -271,6 +271,9 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
++ 			hdrlen = ipv6_optlen(hp);
++ 
++ 		if (!found) {
+++			if (skb->len - start < hdrlen)
+++				return -EBADMSG;
+++
++ 			nexthdr = hp->nexthdr;
++ 			start += hdrlen;
++ 		}
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/905-ipv4-udp-create-exceptions-before-socket-matching.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/905-ipv4-udp-create-exceptions-before-socket-matching.patch
+new file mode 100644
+index 0000000..0fe5e2f
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/905-ipv4-udp-create-exceptions-before-socket-matching.patch
+@@ -0,0 +1,88 @@
++From 0cf0ff2f728f2a1434c56c0bcf267fe230abf124 Mon Sep 17 00:00:00 2001
++From: Ido Schimmel <idosch@nvidia.com>
++Date: Thu, 22 Oct 2026 15:27:23 -0400
++Subject: [PATCH] ipv4: udp: Create exceptions before socket matching
++
++[ Upstream commit 4c3499f79f8c7e8561266bcc220a18538cec0458 ]
++
++Currently, when ICMP Fragmentation Needed and Redirect Message packets
++are locally delivered and quote a UDP packet, a FIB nexthop exception
++(FNHE) is only created if the kernel can match the UDP packet to an
++existing socket.
++
++This behavior allows off-path attackers to conduct a side-channel attack
++on the FNHE cache in order to discover the ephemeral port used by a
++connected UDP socket.
++
++Commit 6457378fe796 ("ipv4: use siphash instead of Jenkins in
++fnhe_hashfun()") and commit 67d6d681e15b ("ipv4: make exception cache
++less predictible") tried to mitigate such attacks by making it harder
++for attackers to discover hash collisions in the FNHE cache and by
++randomizing the number of exceptions a hash bucket can hold,
++respectively. Unfortunately, both of the mitigations can be bypassed.
++
++Instead, mitigate such attacks by always creating a FNHE, even before
++trying to find a matching socket. Do that by calling ipv4_update_pmtu()
++and ipv4_redirect(), the helpers used when the quoted packet did not
++originate from a socket.
++
++This means that guesses (right or wrong) from an off-path attacker will
++always result in a FNHE being created or updated in the cache that the
++attacker can observe.
++
++Pass an oif of 0, in a similar fashion to icmp_err(). This is also the
++oif used by the socket path for sockets that are not bound to a device.
++
++Note that this does not allow attackers to create FNHEs that they could
++not create before, as both helpers can already be reached with little to
++no validation. For example, by sending an ICMP error that quotes an ICMP
++Echo Reply or one that quotes a UDP source port that matches a wildcard
++socket.
++
++Also note that in the good case (matched socket) the above scheme comes
++at the cost of an extra route lookup, as the no socket helpers perform
++their own lookup before the one performed by ipv4_sk_update_pmtu() /
++ipv4_sk_redirect(). When the two resolve to different nexthops, it also
++results in two exceptions being created for the same destination IP. One
++in the FNHE cache of the nexthop resolved by the no socket helpers and
++another in the FNHE cache of the nexthop used by the socket.
++
++Fixes: 4895c771c7f0 ("ipv4: Add FIB nexthop exceptions.")
++Cc: stable@vger.kernel.org
++Reported-by: Amit Klein <aksecurity@gmail.com>
++Reported-by: Noam Caspi <noam.caspi@mail.huji.ac.il>
++Signed-off-by: Ido Schimmel <idosch@nvidia.com>
++Reviewed-by: David Ahern <dsahern@kernel.org>
++Link: https://patch.msgid.link/20260828192344.2596928-3-idosch@nvidia.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++[ sashal: inlined udp_err_update_exception() into the existing udp_err() wrapper ]
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/ipv4/udp.c | 11 ++++++++++-
++ 1 file changed, 10 insertions(+), 1 deletion(-)
++
++diff --git a/net/ipv4/udp.c b/net/ipv4/udp.c
++index 86a1b2c9e..8ceaeef5c 100644
++--- a/net/ipv4/udp.c
+++++ b/net/ipv4/udp.c
++@@ -870,7 +870,16 @@ out:
++ 
++ int udp_err(struct sk_buff *skb, u32 info)
++ {
++-	return __udp4_lib_err(skb, info, dev_net(skb->dev)->ipv4.udp_table);
+++	const int type = icmp_hdr(skb)->type;
+++	const int code = icmp_hdr(skb)->code;
+++	struct net *net = dev_net(skb->dev);
+++
+++	if (type == ICMP_DEST_UNREACH && code == ICMP_FRAG_NEEDED)
+++		ipv4_update_pmtu(skb, net, info, 0, IPPROTO_UDP);
+++	else if (type == ICMP_REDIRECT)
+++		ipv4_redirect(skb, net, 0, IPPROTO_UDP);
+++
+++	return __udp4_lib_err(skb, info, net->ipv4.udp_table);
++ }
++ 
++ /*
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/906-ipv6-udp-create-exceptions-before-socket-matching.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/906-ipv6-udp-create-exceptions-before-socket-matching.patch
+new file mode 100644
+index 0000000..d5cc217
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/906-ipv6-udp-create-exceptions-before-socket-matching.patch
+@@ -0,0 +1,99 @@
++From 128d11b1281f68dfcc9ca403a58e5004e9d13c66 Mon Sep 17 00:00:00 2001
++From: Ido Schimmel <idosch@nvidia.com>
++Date: Fri, 28 Aug 2026 22:23:43 +0300
++Subject: [PATCH] ipv6: udp: Create exceptions before socket matching
++
++[ Upstream commit ac76cab50e899a7346408b8d3c3a4192c2eefb9f ]
++
++Currently, when ICMPv6 Packet Too Big and Redirect Message packets are
++locally delivered and quote a UDP packet, an exception is only created
++in the IPv6 exception cache if the kernel can match the UDP packet to an
++existing socket.
++
++This behavior allows off-path attackers to conduct a side-channel attack
++on the exception cache in order to discover the ephemeral port used by a
++connected UDP socket.
++
++Commit 4785305c05b2 ("ipv6: use siphash in rt6_exception_hash()") and
++commit a00df2caffed ("ipv6: make exception cache less predictible") tried
++to mitigate such attacks by making it harder for attackers to discover
++hash collisions in the exception cache and by randomizing the number of
++exceptions a hash bucket can hold, respectively. Unfortunately, both of
++the mitigations can be bypassed.
++
++Instead, mitigate such attacks by always creating an exception, even
++before trying to find a matching socket. Do that by calling
++ip6_update_pmtu() and ip6_redirect(), the helpers used when the quoted
++packet did not originate from a socket.
++
++This means that guesses (right or wrong) from an off-path attacker will
++always result in an exception being created or updated in the cache that
++the attacker can observe.
++
++Pass the ifindex of the ingress device and the default uid, in a similar
++fashion to icmpv6_err(). Unlike IPv4, an oif of 0 would not match any
++nexthop in ip6_redirect_nh_match() and no exception would be created in
++response to a Redirect Message.
++
++Note that this does not allow attackers to create exceptions that they
++could not create before, as both helpers can already be reached with
++little to no validation. For example, by sending an ICMPv6 error that
++quotes an ICMPv6 Echo Reply or one that quotes a UDP source port that
++matches a wildcard socket.
++
++Also note that in the good case (matched socket) the above scheme comes
++at the cost of an extra route lookup, as the no socket helpers perform
++their own lookup before the one performed by ip6_sk_update_pmtu() /
++ip6_sk_redirect(). When the two resolve to different nexthops, it also
++results in two exceptions being created for the same destination IP. One
++in the exception cache of the nexthop resolved by the no socket helpers
++and another in the exception cache of the nexthop used by the socket.
++
++Fixes: 2b760fcf5cfb ("ipv6: hook up exception table to store dst cache")
++Cc: stable@vger.kernel.org
++Reported-by: Amit Klein <aksecurity@gmail.com>
++Reported-by: Noam Caspi <noam.caspi@mail.huji.ac.il>
++Signed-off-by: Ido Schimmel <idosch@nvidia.com>
++Reviewed-by: David Ahern <dsahern@kernel.org>
++Link: https://patch.msgid.link/20260828192344.2596928-4-idosch@nvidia.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++[ sashal: Placed the new exception-creating helper call inside the shared __udp6_lib_err() (which takes a udptable argument) instead of udpv6_err(), and dropped the daddr/saddr assignments since they are initialised inline. ]
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/ipv6/udp.c | 13 +++++++++++++
++ 1 file changed, 13 insertions(+)
++
++diff --git a/net/ipv6/udp.c b/net/ipv6/udp.c
++index 8cb969b4d..640452e6b 100644
++--- a/net/ipv6/udp.c
+++++ b/net/ipv6/udp.c
++@@ -617,6 +617,17 @@ out:
++ 	return sk;
++ }
++ 
+++static void udpv6_err_update_exception(struct net *net, struct sk_buff *skb,
+++				       u8 type, __be32 info)
+++{
+++	if (type == ICMPV6_PKT_TOOBIG)
+++		ip6_update_pmtu(skb, net, info, skb->dev->ifindex, 0,
+++				sock_net_uid(net, NULL));
+++	else if (type == NDISC_REDIRECT)
+++		ip6_redirect(skb, net, skb->dev->ifindex, 0,
+++			     sock_net_uid(net, NULL));
+++}
+++
++ int __udp6_lib_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
++ 		   u8 type, u8 code, int offset, __be32 info,
++ 		   struct udp_table *udptable)
++@@ -632,6 +643,8 @@ int __udp6_lib_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
++ 	int err;
++ 	struct net *net = dev_net(skb->dev);
++ 
+++	udpv6_err_update_exception(net, skb, type, info);
+++
++ 	sk = __udp6_lib_lookup(net, daddr, uh->dest, saddr, uh->source,
++ 			       inet6_iif(skb), inet6_sdif(skb), udptable, NULL);
++ 
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/907-tcp-fix-potential-uaf-in-reqsk-timer-handler.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/907-tcp-fix-potential-uaf-in-reqsk-timer-handler.patch
+new file mode 100644
+index 0000000..176409c
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/907-tcp-fix-potential-uaf-in-reqsk-timer-handler.patch
+@@ -0,0 +1,47 @@
++From c130cc5f70b1f8f1f8f18432dfdc90ac59673f31 Mon Sep 17 00:00:00 2001
++From: Kuniyuki Iwashima <kuniyu@google.com>
++Date: Wed, 6 May 2026 03:59:18 +0000
++Subject: [PATCH] tcp: Fix potential UAF in reqsk_timer_handler().
++
++commit 97c8a3c1f73d828de43a5a88e8a9a143efb2b661 upstream.
++
++When TCP socket migration fails at inet_ehash_insert() in
++reqsk_timer_handler(), we jump to the no_ownership: label
++and free the new reqsk immediately with __reqsk_free().
++
++Thus, we must stop the new reqsk's timer before jumping to the
++label, but the timer might be missed since the cited commit,
++resulting in UAF.
++
++As we are in the original reqsk's timer context, we can safely
++call timer_delete_sync() for the new reqsk.
++
++Let's pass false to __inet_csk_reqsk_queue_drop() to stop
++the new reqsk's timer.
++
++Fixes: 83fccfc3940c ("inet: fix potential deadlock in reqsk_queue_unlink()")
++Reported-by: Damiano Melotti <melotti@google.com>
++Signed-off-by: Kuniyuki Iwashima <kuniyu@google.com>
++Link: https://patch.msgid.link/20260506035954.1563147-2-kuniyu@google.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
++---
++ net/ipv4/inet_connection_sock.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/net/ipv4/inet_connection_sock.c b/net/ipv4/inet_connection_sock.c
++index eace2be30..af4c46d84 100644
++--- a/net/ipv4/inet_connection_sock.c
+++++ b/net/ipv4/inet_connection_sock.c
++@@ -1101,7 +1101,7 @@ static void reqsk_timer_handler(struct timer_list *t)
++ 
++ 		if (!inet_ehash_insert(req_to_sk(nreq), req_to_sk(oreq), NULL)) {
++ 			/* delete timer */
++-			__inet_csk_reqsk_queue_drop(sk_listener, nreq, true);
+++			__inet_csk_reqsk_queue_drop(sk_listener, nreq, false);
++ 			goto no_ownership;
++ 		}
++ 
++-- 
++2.56.1
++
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/908-inet-reject-unhashed-sockets-during-established-lookups.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/908-inet-reject-unhashed-sockets-during-established-lookups.patch
+new file mode 100644
+index 0000000..8151faf
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/908-inet-reject-unhashed-sockets-during-established-lookups.patch
+@@ -0,0 +1,188 @@
++From cedc85d95ce0d552519c4506927a691c5b97a5dc Mon Sep 17 00:00:00 2001
++From: Hyunwoo Kim <imv4bel@gmail.com>
++Date: Fri, 30 Oct 2026 06:42:16 +0900
++Subject: [PATCH] inet: reject unhashed sockets during established lookups
++
++[ Upstream commit 4e2b3ef19e0e04adca38442f07dd6bc93c712bf1 ]
++
++TCP established ehash lookups are lockless. The socket caches involved
++use SLAB_TYPESAFE_BY_RCU, so memory can be reused before an RCU reader
++that retained its old address has finished.
++
++After a tuple match, __inet_lookup_established() and
++__inet6_lookup_established() acquire a reference and repeat the tuple
++check. They do not check whether the new object is hashed. If the
++address is reused for a socket with the same tuple, the lookup can
++acquire a reference to the new object and return it while its nulls node
++is unhashed.
++
++A PoC that drives reuse with a SYN cookie request socket reproduced the
++crash. The new request socket is unhashed and has a NULL rsk_listener.
++A lookup that had loaded the address of the old request socket acquired
++the reference published by tcp_get_cookie_sock() and returned the new
++object. tcp_v4_rcv() then read sk_state through the NULL listener.
++
++The resulting crash was:
++
++  BUG: kernel NULL pointer dereference, address: 0000000000000012
++  #PF: supervisor read access in kernel mode
++  #PF: error_code(0x0000) - not-present page
++  ...
++  Oops: Oops: 0000 [#1] SMP NOPTI
++  CPU: 4 UID: 0 PID: 0 Comm: swapper/4 Not tainted 7.3.0-00591-g0e135910deec #1 PREEMPT(lazy)
++  ...
++  RIP: 0010:tcp_v4_rcv+0x44e/0x1280
++  ...
++  R10: 0000000000000001 R11: 00000000024ca8c0 R12: 0000000000000000
++  ...
++  CR2: 0000000000000012 CR3: 0000000103d50004 CR4: 0000000000770ef0
++  ...
++  Call Trace:
++   <IRQ>
++   ? raw_local_deliver+0xae/0x240
++   ip_protocol_deliver_rcu+0x2d/0x180
++   ip_local_deliver_finish+0x84/0x100
++   ip_sublist_rcv_finish+0x5f/0x70
++   ip_sublist_rcv+0x12a/0x1d0
++   ip_list_rcv+0xfd/0x130
++   __netif_receive_skb_list_core+0x223/0x250
++   netif_receive_skb_list_internal+0x1d2/0x2c0
++   ? try_fill_recv+0x39/0x7b0
++   napi_complete_done+0x74/0x170
++   virtnet_poll+0x445/0x600
++   __napi_poll+0x27/0x1e0
++   net_rx_action+0x2fe/0x3b0
++   handle_softirqs+0xc2/0x2c0
++   __irq_exit_rcu+0x74/0xd0
++   common_interrupt+0x7f/0x90
++   </IRQ>
++  ...
++  Kernel panic - not syncing: Fatal exception in interrupt
++
++After taking a reference, check whether the nulls node is unhashed in
++both IPv4 and IPv6 established lookups. If it is unhashed or the tuple
++no longer matches, drop the reference and restart the lookup.
++
++Lookups racing with the TIME_WAIT hashdance, or with a request being
++replaced by its child, now restart and find the new socket instead of
++returning the old one.
++
++Request sockets that were never inserted into ehash can have a nonzero
++refcount, and a stale lookup can hold a transient reference. Therefore,
++when SYN cookie, Fast Open, and request migration paths fail after
++setting a nonzero refcount, release the references held by those paths
++with reqsk_put() instead of freeing the request directly.
++
++Fixes: 079096f103fa ("tcp/dccp: install syn_recv requests into ehash table")
++Cc: stable@vger.kernel.org
++Signed-off-by: Hyunwoo Kim <imv4bel@gmail.com>
++Reviewed-by: Eric Dumazet <edumazet@kernel.org>
++Reviewed-by: Kuniyuki Iwashima <kuniyu@google.com>
++Link: https://patch.msgid.link/20261029214219.1035176-2-imv4bel@gmail.com
++Signed-off-by: Paolo Abeni <pabeni@redhat.com>
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/ipv4/inet_connection_sock.c | 10 +++++++---
++ net/ipv4/inet_hashtables.c      |  5 +++--
++ net/ipv4/syncookies.c           |  2 ++
++ net/ipv4/tcp_input.c            |  4 +++-
++ net/ipv6/inet6_hashtables.c     |  4 +++-
++ 5 files changed, 18 insertions(+), 7 deletions(-)
++
++diff --git a/net/ipv4/inet_connection_sock.c b/net/ipv4/inet_connection_sock.c
++index 78611165f..a8444a895 100644
++--- a/net/ipv4/inet_connection_sock.c
+++++ b/net/ipv4/inet_connection_sock.c
++@@ -1116,10 +1116,14 @@ static void reqsk_timer_handler(struct timer_list *t)
++ 	 */
++ 	if (nreq) {
++ 		__NET_INC_STATS(net, LINUX_MIB_TCPMIGRATEREQFAILURE);
+++		/* The timer was not armed, drop its reference here. */
+++		reqsk_put(nreq);
++ no_ownership:
++ 		reqsk_migrate_reset(nreq);
++ 		reqsk_queue_removed(queue, nreq);
++-		__reqsk_free(nreq);
+++		/* Drop the temporary reference and the one reserved for ehash. */
+++		reqsk_put(nreq);
+++		reqsk_put(nreq);
++ 	}
++ 
++ drop:
++@@ -1391,7 +1395,7 @@ struct sock *inet_csk_complete_hashdance(struct sock *sk, struct sock *child,
++ 
++ 			__NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPMIGRATEREQFAILURE);
++ 			reqsk_migrate_reset(nreq);
++-			__reqsk_free(nreq);
+++			reqsk_put(nreq);
++ 		} else if (inet_csk_reqsk_queue_add(sk, req, child)) {
++ 			return child;
++ 		}
++@@ -1445,7 +1449,7 @@ void inet_csk_listen_stop(struct sock *sk)
++ 					__NET_INC_STATS(sock_net(nsk),
++ 							LINUX_MIB_TCPMIGRATEREQFAILURE);
++ 					reqsk_migrate_reset(nreq);
++-					__reqsk_free(nreq);
+++					reqsk_put(nreq);
++ 				}
++ 
++ 				/* inet_csk_reqsk_queue_add() has already
++diff --git a/net/ipv4/inet_hashtables.c b/net/ipv4/inet_hashtables.c
++index 7967ff7e0..59f1c3fcb 100644
++--- a/net/ipv4/inet_hashtables.c
+++++ b/net/ipv4/inet_hashtables.c
++@@ -518,8 +518,9 @@ struct sock *__inet_lookup_established(struct net *net,
++ 		if (likely(inet_match(net, sk, acookie, ports, dif, sdif))) {
++ 			if (unlikely(!refcount_inc_not_zero(&sk->sk_refcnt)))
++ 				goto out;
++-			if (unlikely(!inet_match(net, sk, acookie,
++-						 ports, dif, sdif))) {
+++			if (unlikely(hlist_nulls_unhashed_lockless(&sk->sk_nulls_node) ||
+++				     !inet_match(net, sk, acookie, ports, dif,
+++						 sdif))) {
++ 				sock_gen_put(sk);
++ 				goto begin;
++ 			}
++diff --git a/net/ipv4/syncookies.c b/net/ipv4/syncookies.c
++index e14356207..4eb1e28a5 100644
++--- a/net/ipv4/syncookies.c
+++++ b/net/ipv4/syncookies.c
++@@ -215,6 +215,8 @@ struct sock *tcp_get_cookie_sock(struct sock *sk, struct sk_buff *skb,
++ 
++ 		bh_unlock_sock(child);
++ 		sock_put(child);
+++		reqsk_put(req);
+++		return NULL;
++ 	}
++ 	__reqsk_free(req);
++ 
++diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
++index 40fa14bc5..30db521c4 100644
++--- a/net/ipv4/tcp_input.c
+++++ b/net/ipv4/tcp_input.c
++@@ -7186,7 +7186,9 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
++ 		if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {
++ 			bh_unlock_sock(fastopen_sk);
++ 			sock_put(fastopen_sk);
++-			goto drop_and_free;
+++			/* tcp_disconnect() already dropped one reqsk ref. */
+++			reqsk_put(req);
+++			goto drop;
++ 		}
++ 		sk->sk_data_ready(sk);
++ 		bh_unlock_sock(fastopen_sk);
++diff --git a/net/ipv6/inet6_hashtables.c b/net/ipv6/inet6_hashtables.c
++index b0e8d278e..e755e9099 100644
++--- a/net/ipv6/inet6_hashtables.c
+++++ b/net/ipv6/inet6_hashtables.c
++@@ -75,7 +75,9 @@ struct sock *__inet6_lookup_established(struct net *net,
++ 		if (unlikely(!refcount_inc_not_zero(&sk->sk_refcnt)))
++ 			goto out;
++ 
++-		if (unlikely(!inet6_match(net, sk, saddr, daddr, ports, dif, sdif))) {
+++		if (unlikely(hlist_nulls_unhashed_lockless(&sk->sk_nulls_node) ||
+++			     !inet6_match(net, sk, saddr, daddr, ports, dif,
+++					  sdif))) {
++ 			sock_gen_put(sk);
++ 			goto begin;
++ 		}
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/909-net-limit-priority-vlan-untag-depth.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/909-net-limit-priority-vlan-untag-depth.patch
+new file mode 100644
+index 0000000..28891af
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/909-net-limit-priority-vlan-untag-depth.patch
+@@ -0,0 +1,77 @@
++From 052a62de6e467646a2a5f8baced4ea319319ae75 Mon Sep 17 00:00:00 2001
++From: Kamil Sawicki <user148783812897@gmail.com>
++Date: Sat, 7 Nov 2026 07:01:51 -0500
++Subject: [PATCH] net: limit priority VLAN untag depth
++
++[ Upstream commit d3ff07f5acc573e5f72bf1c581bae5d05191ba61 ]
++
++The priority VLAN receive path can repeatedly remove VID 0 tags and retry
++packet processing. Unlike the read-only VLAN protocol parser, this path has
++no limit on the number of nested tags it consumes.
++
++Each skb_vlan_untag() advances skb->data and resets header offsets. The
++offsets are stored in 16-bit fields. With enough nested tags, the network
++or transport offset can wrap. A later protocol handler can then derive a
++large pull length from the wrapped offsets and access memory outside the
++skb allocation.
++
++Apply the existing VLAN_MAX_DEPTH limit to the exceptional VID 0 retry.
++Count the tag already stored in skb VLAN metadata as the first level, then
++stop before untagging a ninth level. Keep the accounting inside this
++uncommon branch so the regular VLAN receive path is unaffected.
++
++A single VID 0 priority tag before a real VLAN tag is valid. No normal
++deployment was found that intentionally emits multiple consecutive VID 0
++tags; permitting eight levels is therefore conservative.
++
++The issue was found while researching the Linux network receive path for
++Google kvmCTF, with OpenAI Codex (gpt-5.6-sol) assisting the analysis. The
++affected path, reproducer and fix were manually reviewed and tested.
++
++Fixes: 36b2f61a42c2 ("net: handle 802.1P vlan 0 packets properly")
++Cc: stable@vger.kernel.org
++Reviewed-by: Willem de Bruijn <willemb@google.com>
++Signed-off-by: Kamil Sawicki <user148783812897@gmail.com>
++Reviewed-by: Kuniyuki Iwashima <kuniyu@google.com>
++Reviewed-by: Eric Dumazet <edumazet@kernel.org>
++Link: https://patch.msgid.link/20261024004835.17862-1-user148783812897@gmail.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++
++[ Backport to 6.6.y: __netif_receive_skb_core() has no local
++  drop_reason variable, and this branch does not define
++  SKB_DROP_REASON_RECURSION_LIMIT. Omit the upstream assignment
++  and keep the existing SKB_DROP_REASON_UNHANDLED_PROTO drop path. ]
++Signed-off-by: Kamil Sawicki <user148783812897@gmail.com>
++
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/core/dev.c | 6 ++++++
++ 1 file changed, 6 insertions(+)
++
++diff --git a/net/core/dev.c b/net/core/dev.c
++index f9436563a..19d3149d3 100644
++--- a/net/core/dev.c
+++++ b/net/core/dev.c
++@@ -5618,6 +5618,8 @@ skip_classify:
++ 	}
++ 
++ 	if (unlikely(skb_vlan_tag_present(skb)) && !netdev_uses_dsa(skb->dev)) {
+++		unsigned int priority_tag_depth = 1;
+++
++ check_vlan_id:
++ 		if (skb_vlan_tag_get_id(skb)) {
++ 			/* Vlan id is non 0 and vlan_do_receive() above couldn't
++@@ -5629,6 +5631,10 @@ check_vlan_id:
++ 			 * 802.1Q or 802.1AD and vlan_do_receive() above could
++ 			 * not find vlan dev for vlan id 0.
++ 			 */
+++			if (unlikely(priority_tag_depth >= VLAN_MAX_DEPTH))
+++				goto drop;
+++
+++			priority_tag_depth++;
++ 			__vlan_hwaccel_clear_tag(skb);
++ 			skb = skb_vlan_untag(skb);
++ 			if (unlikely(!skb))
++-- 
++2.56.1
++

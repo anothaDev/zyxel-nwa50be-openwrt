@@ -1,0 +1,93 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] zlib: reject negative lengths in crc32_combine
+SPDX-License-Identifier: GPL-2.0-only
+
+Backport upstream zlib commit ba829a458576 (part of zlib 1.3.2) as
+package patch 006, the same fix TIP carries in its patches-25.12 as
+0138 (CVE-2026-27171). x2nmodp() right-shifts a signed offset in a
+loop that only ends at zero, so a negative length passed to
+crc32_combine64() or crc32_combine_gen64() never terminates.
+
+No binary in this image calls these functions; this is defence in
+depth for anything that links libz.so. The patch applies unchanged to
+zlib 1.3.1 after patches 002 to 005.
+
+---
+ package/libs/zlib/Makefile                         |  2 +-
+ ...gative-lengths-in-crc32_combine-functions.patch | 55 ++++++++++++++++++++++
+ 2 files changed, 56 insertions(+), 1 deletion(-)
+
+diff --git a/package/libs/zlib/Makefile b/package/libs/zlib/Makefile
+index 2156554..9168bcc 100644
+--- a/package/libs/zlib/Makefile
++++ b/package/libs/zlib/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=zlib
+ PKG_VERSION:=1.3.1
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL:=https://github.com/madler/zlib
+diff --git a/package/libs/zlib/patches/006-Check-for-negative-lengths-in-crc32_combine-functions.patch b/package/libs/zlib/patches/006-Check-for-negative-lengths-in-crc32_combine-functions.patch
+new file mode 100644
+index 0000000..5b697a4
+--- /dev/null
++++ b/package/libs/zlib/patches/006-Check-for-negative-lengths-in-crc32_combine-functions.patch
+@@ -0,0 +1,55 @@
++From ba829a458576d1ff0f26fc7230c6de816d1f6a77 Mon Sep 17 00:00:00 2001
++From: Mark Adler <git@madler.net>
++Date: Sun, 21 Dec 2025 18:17:56 -0800
++Subject: [PATCH] Check for negative lengths in crc32_combine functions.
++
++Though zlib.h says that len2 must be non-negative, this avoids the
++possibility of an accidental infinite loop.
++---
++ crc32.c | 4 ++++
++ zlib.h  | 4 ++--
++ 2 files changed, 6 insertions(+), 2 deletions(-)
++
++diff --git a/crc32.c b/crc32.c
++index 6c38f5c04c..33d8c7953d 100644
++--- a/crc32.c
+++++ b/crc32.c
++@@ -1019,6 +1019,8 @@ unsigned long ZEXPORT crc32(unsigned long crc, const unsigned char FAR *buf,
++ 
++ /* ========================================================================= */
++ uLong ZEXPORT crc32_combine64(uLong crc1, uLong crc2, z_off64_t len2) {
+++    if (len2 < 0)
+++        return 0;
++ #ifdef DYNAMIC_CRC_TABLE
++     once(&made, make_crc_table);
++ #endif /* DYNAMIC_CRC_TABLE */
++@@ -1032,6 +1034,8 @@ uLong ZEXPORT crc32_combine(uLong crc1, uLong crc2, z_off_t len2) {
++ 
++ /* ========================================================================= */
++ uLong ZEXPORT crc32_combine_gen64(z_off64_t len2) {
+++    if (len2 < 0)
+++        return 0;
++ #ifdef DYNAMIC_CRC_TABLE
++     once(&made, make_crc_table);
++ #endif /* DYNAMIC_CRC_TABLE */
++diff --git a/zlib.h b/zlib.h
++index f7aded9aac..2881da71c6 100644
++--- a/zlib.h
+++++ b/zlib.h
++@@ -1848,14 +1848,14 @@ ZEXTERN uLong ZEXPORT crc32_combine(uLong crc1, uLong crc2, z_off_t len2);
++    seq1 and seq2 with lengths len1 and len2, CRC-32 check values were
++    calculated for each, crc1 and crc2.  crc32_combine() returns the CRC-32
++    check value of seq1 and seq2 concatenated, requiring only crc1, crc2, and
++-   len2. len2 must be non-negative.
+++   len2. len2 must be non-negative, otherwise zero is returned.
++ */
++ 
++ /*
++ ZEXTERN uLong ZEXPORT crc32_combine_gen(z_off_t len2);
++ 
++      Return the operator corresponding to length len2, to be used with
++-   crc32_combine_op(). len2 must be non-negative.
+++   crc32_combine_op(). len2 must be non-negative, otherwise zero is returned.
++ */
++ 
++ ZEXTERN uLong ZEXPORT crc32_combine_op(uLong crc1, uLong crc2, uLong op);

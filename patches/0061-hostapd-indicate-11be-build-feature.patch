@@ -1,0 +1,30 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] hostapd: report 802.11be in the build feature query
+SPDX-License-Identifier: GPL-2.0-only
+
+Answer "hostapd -v11be" with success when the package is built with
+CONFIG_IEEE80211BE. The Wi-Fi 7 overlay carries an older copy of
+build_features.h that knows 11ac and 11ax only. LuCI asks this question
+before it offers a mode, so it dropped BE from the Mode list and showed an
+empty field for a radio configured for BE.
+
+Port of the build_features.h hunk of OpenWrt commit
+b1d6068330c7c23be6d0d2a5c3e8a72ac6e25ac1 ("hostapd: add
+CONFIG_DRIVER_11BE_SUPPORT", Janusz Dziedzic). Nothing in the wireless
+start scripts asks this question, so radio bring-up is unchanged.
+
+diff --git a/feeds/qca-wifi-7/hostapd/src/src/utils/build_features.h b/feeds/qca-wifi-7/hostapd/src/src/utils/build_features.h
+index 553769ec..cc883153 100644
+--- a/feeds/qca-wifi-7/hostapd/src/src/utils/build_features.h
++++ b/feeds/qca-wifi-7/hostapd/src/src/utils/build_features.h
+@@ -15,6 +15,10 @@ static inline int has_feature(const char *feat)
+ 	if (!strcmp(feat, "11ax"))
+ 		return 1;
+ #endif
++#ifdef CONFIG_IEEE80211BE
++	if (!strcmp(feat, "11be"))
++		return 1;
++#endif
+ #ifdef CONFIG_IEEE80211R
+ 	if (!strcmp(feat, "11r"))
+ 		return 1;

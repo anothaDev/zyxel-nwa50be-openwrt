@@ -1,0 +1,650 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] busybox: backport 2026 security fixes to 1.37.0
+SPDX-License-Identifier: GPL-2.0-only
+
+Keep busybox 1.37.0 and its configuration and add upstream fixes for
+CVE-2026-88839 (c2dec52d3), CVE-2026-26157/26158 (3fb6b31c7, 599f5dd8f)
+and CVE-2026-38754 (a448b6d5b), plus the Debian-carried list patches
+for CVE-2026-38752, 38753 and 38755, which are not merged upstream yet.
+
+---
+ package/utils/busybox/Makefile                |   2 +-
+ ...fix-for-trailing-whitespace-removeal.patch |  29 +++
+ ...ink-components-GNU-tar-does-the-same.patch | 168 ++++++++++++++++++
+ ...mponents-from-hardlinks-not-symlinks.patch |  28 +++
+ ...fix-out-of-bounds-read-in-ifsbreakup.patch | 151 ++++++++++++++++
+ ...8-awk-fix-stack-overflow-in-evaluate.patch |  77 ++++++++
+ ...09-awk-fix-use-after-free-in-awk_sub.patch |  48 +++++
+ ...10-ash-fix-stack-overflow-in-evalfun.patch |  65 +++++++
+ 8 files changed, 567 insertions(+), 1 deletion(-)
+ create mode 100644 package/utils/busybox/patches/004-libpwdgrp-tokenizer-fix-for-trailing-whitespace-removeal.patch
+ create mode 100644 package/utils/busybox/patches/005-tar-strip-unsafe-hardlink-components-GNU-tar-does-the-same.patch
+ create mode 100644 package/utils/busybox/patches/006-tar-only-strip-unsafe-components-from-hardlinks-not-symlinks.patch
+ create mode 100644 package/utils/busybox/patches/007-ash-fix-out-of-bounds-read-in-ifsbreakup.patch
+ create mode 100644 package/utils/busybox/patches/008-awk-fix-stack-overflow-in-evaluate.patch
+ create mode 100644 package/utils/busybox/patches/009-awk-fix-use-after-free-in-awk_sub.patch
+ create mode 100644 package/utils/busybox/patches/010-ash-fix-stack-overflow-in-evalfun.patch
+
+diff --git a/package/utils/busybox/Makefile b/package/utils/busybox/Makefile
+index b7d24b74ac..918da5bcc1 100644
+--- a/package/utils/busybox/Makefile
++++ b/package/utils/busybox/Makefile
+@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=busybox
+ PKG_VERSION:=1.37.0
+-PKG_RELEASE:=6
++PKG_RELEASE:=7
+ PKG_FLAGS:=essential
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+diff --git a/package/utils/busybox/patches/004-libpwdgrp-tokenizer-fix-for-trailing-whitespace-removeal.patch b/package/utils/busybox/patches/004-libpwdgrp-tokenizer-fix-for-trailing-whitespace-removeal.patch
+new file mode 100644
+index 0000000000..0792ad4aba
+--- /dev/null
++++ b/package/utils/busybox/patches/004-libpwdgrp-tokenizer-fix-for-trailing-whitespace-removeal.patch
+@@ -0,0 +1,29 @@
++From c2dec52d37380d27d89827cf01a770f6b3b04e3a Mon Sep 17 00:00:00 2001
++From: Denys Vlasenko <vda.linux@googlemail.com>
++Date: Tue, 22 Sep 2026 02:19:06 +0200
++Subject: [PATCH] libpwdgrp: tokenizer fix for trailing whitespace removeal.
++
++The tokenize() function trims trailing whitespace via
++overlapping_strcpy() but continues to reference the stale *end
++pointer. Fixing this.
++
++function                                             old     new   delta
++tokenize                                             120     119      -1
++
++Signed-off-by: Denys Vlasenko <vda.linux@googlemail.com>
++[upstream commit c2dec52d3, CVE-2026-88839]
++---
++ libpwdgrp/pwd_grp.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++--- a/libpwdgrp/pwd_grp.c
+++++ b/libpwdgrp/pwd_grp.c
++@@ -171,7 +171,7 @@ static int tokenize(char *buffer, int ch
++ 			if (p != end)
++ 				overlapping_strcpy(p, end);
++ 			num_fields++;
++-			if (*end == '\0') {
+++			if (*p == '\0') {
++ 				S.tokenize_end = p + 1;
++ 				return num_fields;
++ 			}
+diff --git a/package/utils/busybox/patches/005-tar-strip-unsafe-hardlink-components-GNU-tar-does-the-same.patch b/package/utils/busybox/patches/005-tar-strip-unsafe-hardlink-components-GNU-tar-does-the-same.patch
+new file mode 100644
+index 0000000000..ab07e3df2a
+--- /dev/null
++++ b/package/utils/busybox/patches/005-tar-strip-unsafe-hardlink-components-GNU-tar-does-the-same.patch
+@@ -0,0 +1,168 @@
++From 3fb6b31c716669e12f75a2accd31bb7685b1a1cb Mon Sep 17 00:00:00 2001
++From: Denys Vlasenko <vda.linux@googlemail.com>
++Date: Thu, 29 Jan 2026 11:48:02 +0100
++Subject: [PATCH] tar: strip unsafe hardlink components - GNU tar does the same
++
++Defends against files like these (python reproducer):
++
++import tarfile
++ti = tarfile.TarInfo("leak_hosts")
++ti.type = tarfile.LNKTYPE
++ti.linkname = "/etc/hosts"  # or "../etc/hosts" or ".."
++ti.size = 0
++with tarfile.open("/tmp/hardlink.tar", "w") as t:
++	t.addfile(ti)
++
++function                                             old     new   delta
++skip_unsafe_prefix                                     -     127    +127
++get_header_tar                                      1752    1754      +2
++.rodata                                           106861  106856      -5
++unzip_main                                          2715    2706      -9
++strip_unsafe_prefix                                  102      18     -84
++------------------------------------------------------------------------------
++(add/remove: 1/0 grow/shrink: 1/3 up/down: 129/-98)            Total: 31 bytes
++
++Signed-off-by: Denys Vlasenko <vda.linux@googlemail.com>
++[upstream commit 3fb6b31c7, CVE-2026-26157 and CVE-2026-26158; backported to 1.37.0:
++ dropped the hunks for the FEATURE_PATH_TRAVERSAL_PROTECTION block and
++ networking/httpd_ratelimit_cgi.c, neither of which exists in 1.37.0]
++---
++ archival/libarchive/data_extract_all.c      |  3 +--
++ archival/libarchive/get_header_tar.c        | 11 ++++++--
++ archival/libarchive/unsafe_prefix.c         | 30 +++++++++++++++++----
++ archival/libarchive/unsafe_symlink_target.c |  1 +
++ archival/tar.c                              |  2 +-
++ archival/unzip.c                            |  2 +-
++ include/bb_archive.h                        |  3 ++-
++ 7 files changed, 40 insertions(+), 12 deletions(-)
++
++--- a/archival/libarchive/data_extract_all.c
+++++ b/archival/libarchive/data_extract_all.c
++@@ -177,8 +177,7 @@ void FAST_FUNC data_extract_all(archive_
++ 
++ 		/* To avoid a directory traversal attack via symlinks,
++ 		 * do not restore symlinks with ".." components
++-		 * or symlinks starting with "/", unless a magic
++-		 * envvar is set.
+++		 * or symlinks starting with "/"
++ 		 *
++ 		 * For example, consider a .tar created via:
++ 		 *  $ tar cvf bug.tar anything.txt
++--- a/archival/libarchive/get_header_tar.c
+++++ b/archival/libarchive/get_header_tar.c
++@@ -454,8 +454,15 @@ char FAST_FUNC get_header_tar(archive_ha
++ #endif
++ 
++ 	/* Everything up to and including last ".." component is stripped */
++-	overlapping_strcpy(file_header->name, strip_unsafe_prefix(file_header->name));
++-//TODO: do the same for file_header->link_target?
+++	strip_unsafe_prefix(file_header->name);
+++	if (file_header->link_target) {
+++		/* GNU tar 1.34 examples:
+++		 * tar: Removing leading '/' from hard link targets
+++		 * tar: Removing leading '../' from hard link targets
+++		 * tar: Removing leading 'etc/../' from hard link targets
+++		 */
+++		strip_unsafe_prefix(file_header->link_target);
+++	}
++ 
++ 	/* Strip trailing '/' in directories */
++ 	/* Must be done after mode is set as '/' is used to check if it's a directory */
++--- a/archival/libarchive/unsafe_prefix.c
+++++ b/archival/libarchive/unsafe_prefix.c
++@@ -5,11 +5,11 @@
++ #include "libbb.h"
++ #include "bb_archive.h"
++ 
++-const char* FAST_FUNC strip_unsafe_prefix(const char *str)
+++const char* FAST_FUNC skip_unsafe_prefix(const char *str)
++ {
++ 	const char *cp = str;
++ 	while (1) {
++-		char *cp2;
+++		const char *cp2;
++ 		if (*cp == '/') {
++ 			cp++;
++ 			continue;
++@@ -18,10 +18,25 @@ const char* FAST_FUNC strip_unsafe_prefi
++ 			cp += 3;
++ 			continue;
++ 		}
++-		cp2 = strstr(cp, "/../");
+++		cp2 = cp;
+++ find_dotdot:
+++		cp2 = strstr(cp2, "/..");
++ 		if (!cp2)
++-			break;
++-		cp = cp2 + 4;
+++			break; /* No (more) malicious components */
+++
+++		/* We found "/..something" */
+++		cp2 += 3;
+++		if (*cp2 != '/') {
+++			if (*cp2 == '\0') {
+++				/* Trailing "/..": malicious, return "" */
+++				/* (causes harmless errors trying to create or hardlink a file named "") */
+++				return cp2;
+++			}
+++			/* "/..name" is not malicious, look for next "/.." */
+++			goto find_dotdot;
+++		}
+++		/* Found "/../": malicious, advance past it */
+++		cp = cp2 + 1;
++ 	}
++ 	if (cp != str) {
++ 		static smallint warned = 0;
++@@ -33,3 +48,8 @@ const char* FAST_FUNC strip_unsafe_prefi
++ 	}
++ 	return cp;
++ }
+++
+++void FAST_FUNC strip_unsafe_prefix(char *str)
+++{
+++	overlapping_strcpy(str, skip_unsafe_prefix(str));
+++}
++--- a/archival/libarchive/unsafe_symlink_target.c
+++++ b/archival/libarchive/unsafe_symlink_target.c
++@@ -36,6 +36,7 @@ void FAST_FUNC create_links_from_list(ll
++ 				*list->data ? "hard" : "sym",
++ 				list->data + 1, target
++ 			);
+++			/* Note: GNU tar 1.34 errors out only _after_ all links are (attempted to be) created */
++ 		}
++ 		list = list->link;
++ 	}
++--- a/archival/tar.c
+++++ b/archival/tar.c
++@@ -475,7 +475,7 @@ static int FAST_FUNC writeFileToTarball(
++ 	DBG("writeFileToTarball('%s')", fileName);
++ 
++ 	/* Strip leading '/' and such (must be before memorizing hardlink's name) */
++-	header_name = strip_unsafe_prefix(fileName);
+++	header_name = skip_unsafe_prefix(fileName);
++ 
++ 	if (header_name[0] == '\0')
++ 		return TRUE;
++--- a/archival/unzip.c
+++++ b/archival/unzip.c
++@@ -860,7 +860,7 @@ int unzip_main(int argc, char **argv)
++ 
++ 		/* Guard against "/abspath", "/../" and similar attacks */
++ // NB: UnZip 6.00 has option -: to disable this
++-		overlapping_strcpy(dst_fn, strip_unsafe_prefix(dst_fn));
+++		strip_unsafe_prefix(dst_fn);
++ 
++ 		/* Filter zip entries */
++ 		if (find_list_entry(zreject, dst_fn)
++--- a/include/bb_archive.h
+++++ b/include/bb_archive.h
++@@ -202,7 +202,8 @@ char get_header_tar_xz(archive_handle_t
++ void seek_by_jump(int fd, off_t amount) FAST_FUNC;
++ void seek_by_read(int fd, off_t amount) FAST_FUNC;
++ 
++-const char *strip_unsafe_prefix(const char *str) FAST_FUNC;
+++const char *skip_unsafe_prefix(const char *str) FAST_FUNC;
+++void strip_unsafe_prefix(char *str) FAST_FUNC;
++ void create_or_remember_link(llist_t **link_placeholders,
++ 		const char *target,
++ 		const char *linkname,
+diff --git a/package/utils/busybox/patches/006-tar-only-strip-unsafe-components-from-hardlinks-not-symlinks.patch b/package/utils/busybox/patches/006-tar-only-strip-unsafe-components-from-hardlinks-not-symlinks.patch
+new file mode 100644
+index 0000000000..03513cf6e8
+--- /dev/null
++++ b/package/utils/busybox/patches/006-tar-only-strip-unsafe-components-from-hardlinks-not-symlinks.patch
+@@ -0,0 +1,28 @@
++From 599f5dd8fac390c18b79cba4c14c334957605dae Mon Sep 17 00:00:00 2001
++From: Radoslav Kolev <radoslav.kolev@suse.com>
++Date: Mon, 16 Feb 2026 11:50:04 +0200
++Subject: [PATCH] tar: only strip unsafe components from hardlinks, not
++ symlinks
++
++commit 3fb6b31c7 introduced a check for unsafe components in
++tar archive hardlinks, but it was being applied to symlinks too
++which broke "Symlinks and hardlinks coexist" tar test.
++
++Signed-off-by: Radoslav Kolev <radoslav.kolev@suse.com>
++Signed-off-by: Denys Vlasenko <vda.linux@googlemail.com>
++[upstream commit 599f5dd8f, follow-up to 3fb6b31c7]
++---
++ archival/libarchive/get_header_tar.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++--- a/archival/libarchive/get_header_tar.c
+++++ b/archival/libarchive/get_header_tar.c
++@@ -455,7 +455,7 @@ char FAST_FUNC get_header_tar(archive_ha
++ 
++ 	/* Everything up to and including last ".." component is stripped */
++ 	strip_unsafe_prefix(file_header->name);
++-	if (file_header->link_target) {
+++	if (file_header->link_target && !S_ISLNK(file_header->mode)) {
++ 		/* GNU tar 1.34 examples:
++ 		 * tar: Removing leading '/' from hard link targets
++ 		 * tar: Removing leading '../' from hard link targets
+diff --git a/package/utils/busybox/patches/007-ash-fix-out-of-bounds-read-in-ifsbreakup.patch b/package/utils/busybox/patches/007-ash-fix-out-of-bounds-read-in-ifsbreakup.patch
+new file mode 100644
+index 0000000000..e1ed5de847
+--- /dev/null
++++ b/package/utils/busybox/patches/007-ash-fix-out-of-bounds-read-in-ifsbreakup.patch
+@@ -0,0 +1,151 @@
++From a448b6d5b21e5b21249391389b6f0551d9bea136 Mon Sep 17 00:00:00 2001
++From: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++Date: Thu, 18 Jun 2026 17:04:20 +0900
++Subject: [PATCH] ash: fix out-of-bounds read in ifsbreakup()
++
++ifsfree() does not only release allocated ifsregion nodes; it also clears
++the global IFS region state used by ifsbreakup(). If argstr() raises an
++error while expanding an argument, ash longjmps out of expandarg() before
++that cleanup runs, leaving stale IFS split offsets behind.
++
++A later expansion can reuse the stack for a shorter string. ifsbreakup()
++then sees the stale IFS state, trusts the old offsets, and can walk past
++the current stack block before dereferencing p.
++
++Follow dash's root-cause fix: when an expansion-related handler catches
++EXERROR and continues, restore the handler and call ifsfree(). Apply
++the cleanup to redirectsafe(), expandstr(), and evaltree().
++
++Upstream commit:
++
++    Date:   Mon Dec 5 23:02:01 2022 +0800
++    expand: Add ifsfree to expand to fix a logic error that causes a buffer over-read
++
++    On Mon, Jun 20, 2022 at 02:27:10PM -0400, Alex Gorinson wrote:
++    > Due to a logic error in the ifsbreakup function in expand.c if a
++    > heredoc and normal command is run one after the other by means of a
++    > semi-colon, when the second command drops into ifsbreakup the command
++    > will be evaluated with the ifslastp/ifsfirst struct that was set when
++    > the here doc was evaluated. This results in a buffer over-read that
++    > can leak the program's heap, stack, and arena addresses which can be
++    > used to beat ASLR.
++    >
++    > Steps to Reproduce:
++    > First bug:
++    > cmd args: ~/exampleDir/example> dash
++    > $ M='AAAAAAAAAAAAAAAAA'    <note: 17 A's>
++    > $ q00(){
++    > $ <<000;echo
++    > $ ${D?$M$M$M$M$M$M}        <note: 6 $M's>
++    > $ 000
++    > $ }
++    > $ q00                      <note: After the q00 is typed in, the leak
++    > should be echo'd out; this works with ash, busybox ash, and dash and
++    > with all option args.>
++    >
++    > Patch:
++    > Adding the following to expand.c will fix both bugs in one go.
++    > (Thank you to Harald van Dijk and Michael Greenberg for doing the
++    > heavy lifting for this patch!)
++    > ==========================
++    > --- a/src/expand.c
++    > +++ b/src/expand.c
++    > @@ -859,6 +859,7 @@
++    > if (discard)
++    > return -1;
++    >
++    > +ifsfree();
++    > sh_error("Bad substitution");
++    > }
++    >
++    > @@ -1739,6 +1740,7 @@
++    > } else
++    > msg = umsg;
++    > }
++    > +ifsfree();
++    > sh_error("%.*s: %s%s", end - var - 1, var, msg, tail);
++    >  }
++    > ==========================
++
++    Thanks for the report!
++
++    I think it's better to add the ifsfree() call to the exception
++    handling path as other sh_error calls may trigger this too.
++
++function                                             old     new   delta
++restore_handler_expandarg                              -      33     +33
++evaltree                                             725     711     -14
++static.redirectsafe                                  141     124     -17
++expandstr                                            262     242     -20
++------------------------------------------------------------------------------
++(add/remove: 1/0 grow/shrink: 0/3 up/down: 36/-45)            Total: -18 bytes
++
++Signed-off-by: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++Signed-off-by: Denys Vlasenko <vda.linux@googlemail.com>
++[upstream commit a448b6d5b, CVE-2026-38754; backported to 1.37.0:
++ forward declaration context adjusted]
++---
++ shell/ash.c | 24 +++++++++++++++---------
++ 1 file changed, 15 insertions(+), 9 deletions(-)
++
++--- a/shell/ash.c
+++++ b/shell/ash.c
++@@ -5472,6 +5472,7 @@ stoppedjobs(void)
++  */
++ /* openhere needs this forward reference */
++ static void expandhere(union node *arg);
+++static void ifsfree(void);
++ static int
++ openhere(union node *redir)
++ {
++@@ -5913,6 +5914,17 @@ redirect(union node *redir, int flags)
++ 	//	preverrout_fd = copied_fd2;
++ }
++ 
+++static void
+++restore_handler_expandarg(struct jmploc *savehandler, int err)
+++{
+++	exception_handler = savehandler;
+++	if (err) {
+++		if (exception_type != EXERROR)
+++			longjmp(exception_handler->loc, 1);
+++		ifsfree();
+++	}
+++}
+++
++ static int
++ redirectsafe(union node *redir, int flags)
++ {
++@@ -5928,9 +5940,7 @@ redirectsafe(union node *redir, int flag
++ 		exception_handler = &jmploc;
++ 		redirect(redir, flags);
++ 	}
++-	exception_handler = savehandler;
++-	if (err && exception_type != EXERROR)
++-		longjmp(exception_handler->loc, 1);
+++	restore_handler_expandarg(savehandler, err);
++ 	RESTORE_INT(saveint);
++ 	return err;
++ }
++@@ -9445,9 +9455,7 @@ evaltree(union node *n, int flags)
++ 			trap_depth--;
++ 			in_trap_ERR = 0;
++ 
++-			exception_handler = savehandler;
++-			if (err && exception_type != EXERROR)
++-				longjmp(exception_handler->loc, 1);
+++			restore_handler_expandarg(savehandler, err);
++ 
++ 			exitstatus = savestatus;
++ 		}
++@@ -13487,9 +13495,7 @@ expandstr(const char *ps, int syntax_typ
++ 	result = stackblock();
++ 
++ out:
++-	exception_handler = savehandler;
++-	if (err && exception_type != EXERROR)
++-		longjmp(exception_handler->loc, 1);
+++	restore_handler_expandarg(savehandler, err);
++ 
++ 	doprompt = saveprompt;
++ 	/* Try: PS1='`xxx(`' */
+diff --git a/package/utils/busybox/patches/008-awk-fix-stack-overflow-in-evaluate.patch b/package/utils/busybox/patches/008-awk-fix-stack-overflow-in-evaluate.patch
+new file mode 100644
+index 0000000000..11051041db
+--- /dev/null
++++ b/package/utils/busybox/patches/008-awk-fix-stack-overflow-in-evaluate.patch
+@@ -0,0 +1,77 @@
++From: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++Date: Tue, 16 Jun 2026 12:16:05 +0900
++Subject: [PATCH] awk: fix stack overflow in evaluate()
++
++Recursive awk functions can keep re-entering evaluate() until the
++process stack is exhausted. Track active function-call depth and report a
++normal awk error once the limit is reached instead of overflowing the
++stack.
++
++Signed-off-by: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++[CVE-2026-38752; not merged upstream as of 2026-10-28, posted at
++ https://lists.busybox.net/pipermail/busybox/2026-June/092351.html and
++ carried by Debian busybox 1:1.38.0-3]
++---
++ editors/awk.c | 9 +++++++++
++ 1 file changed, 9 insertions(+)
++
++--- a/editors/awk.c
+++++ b/editors/awk.c
++@@ -638,6 +638,7 @@ struct globals2 {
++ 	smalluint exitcode;
++ 
++ 	unsigned evaluate__seed;
+++	unsigned evaluate__func_depth;
++ 	var *evaluate__fnargs;
++ 	regex_t evaluate__sreg;
++ 
++@@ -709,6 +710,7 @@ static const char EMSG_UNEXP_TOKEN[] ALI
++ static const char EMSG_DIV_BY_ZERO[] ALIGN1 = "Division by zero";
++ static const char EMSG_INV_FMT[] ALIGN1 = "Invalid format specifier";
++ static const char EMSG_TOO_FEW_ARGS[] ALIGN1 = "Too few arguments";
+++static const char EMSG_RECURSION[] ALIGN1 = "Recursion limit exceeded";
++ static const char EMSG_NOT_ARRAY[] ALIGN1 = "Not an array";
++ static const char EMSG_POSSIBLE_ERROR[] ALIGN1 = "Possible syntax error";
++ static const char EMSG_UNDEF_FUNC[] ALIGN1 = "Call to undefined function";
++@@ -2994,6 +2996,7 @@ static var *evaluate(node *op, var *res)
++ #define fnargs (G.evaluate__fnargs)
++ /* seed is initialized to 1 */
++ #define seed   (G.evaluate__seed)
+++#define func_depth (G.evaluate__func_depth)
++ #define sreg   (G.evaluate__sreg)
++ 
++ 	var *tmpvars;
++@@ -3305,13 +3308,17 @@ static var *evaluate(node *op, var *res)
++ 			var *argvars, *sv_fnargs;
++ 			const char *sv_progname;
++ 			int nargs, i;
+++			enum { MAX_AWK_FUNC_DEPTH = 1000 };
++ 
++ 			debug_printf_eval("FUNC\n");
++ 
++ 			if (!op->r.f->defined)
++ 				syntax_error(EMSG_UNDEF_FUNC);
+++			if (func_depth >= MAX_AWK_FUNC_DEPTH)
+++				syntax_error(EMSG_RECURSION);
++ 
++ 			/* The body might be empty, still has to eval the args */
+++			func_depth++;
++ 			nargs = op->r.f->nargs;
++ 			argvars = nvalloc(nargs);
++ 			i = 0;
++@@ -3339,6 +3346,7 @@ static var *evaluate(node *op, var *res)
++ 
++ 			g_progname = sv_progname;
++ 			fnargs = sv_fnargs;
+++			func_depth--;
++ 
++ 			break;
++ 		}
++@@ -3696,6 +3704,7 @@ static var *evaluate(node *op, var *res)
++ 	return res;
++ #undef fnargs
++ #undef seed
+++#undef func_depth
++ #undef sreg
++ }
++ 
+diff --git a/package/utils/busybox/patches/009-awk-fix-use-after-free-in-awk_sub.patch b/package/utils/busybox/patches/009-awk-fix-use-after-free-in-awk_sub.patch
+new file mode 100644
+index 0000000000..f7bb560427
+--- /dev/null
++++ b/package/utils/busybox/patches/009-awk-fix-use-after-free-in-awk_sub.patch
+@@ -0,0 +1,48 @@
++From: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++Date: Tue, 16 Jun 2026 12:18:43 +0900
++Subject: [PATCH] awk: fix use-after-free in awk_sub()
++
++awk_sub() receives the replacement text as a pointer into awk variable
++storage. Evaluating the regular expression argument can change that
++storage through as_regex(), leaving the replacement pointer dangling
++before strlen() and the replacement loop use it.
++
++Copy the replacement string before calling as_regex() so substitution
++uses stable storage for the duration of the operation.
++
++Signed-off-by: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++[CVE-2026-38753; not merged upstream as of 2026-10-28, posted at
++ https://lists.busybox.net/pipermail/busybox/2026-June/092352.html and
++ carried by Debian busybox 1:1.38.0-3]
++---
++ editors/awk.c | 4 ++++
++ 1 file changed, 4 insertions(+)
++
++--- a/editors/awk.c
+++++ b/editors/awk.c
++@@ -2561,6 +2561,7 @@ static char *awk_printf(node *n, size_t
++ static int awk_sub(node *rn, const char *repl, int nm, var *src, var *dest /*,int subexp*/)
++ {
++ 	char *resbuf;
+++	char *repl_copy;
++ 	const char *sp;
++ 	int match_no, residx, replen, resbufsize;
++ 	int regexec_flags;
++@@ -2578,7 +2579,9 @@ static int awk_sub(node *rn, const char
++ 	resbuf = NULL;
++ 	residx = 0;
++ 	match_no = 0;
+++	repl_copy = xstrdup(repl);
++ 	regex = as_regex(rn, &sreg);
+++	repl = repl_copy;
++ 	sp = getvar_s(src ? src : intvar[F0]);
++ #if defined(REG_STARTEND)
++ 	src_string = sp;
++@@ -2668,6 +2671,7 @@ static int awk_sub(node *rn, const char
++ 	setvar_p(dest ? dest : intvar[F0], resbuf);
++ 	if (regex == &sreg)
++ 		regfree(regex);
+++	free(repl_copy);
++ 	return match_no;
++ }
++ 
+diff --git a/package/utils/busybox/patches/010-ash-fix-stack-overflow-in-evalfun.patch b/package/utils/busybox/patches/010-ash-fix-stack-overflow-in-evalfun.patch
+new file mode 100644
+index 0000000000..e09567a270
+--- /dev/null
++++ b/package/utils/busybox/patches/010-ash-fix-stack-overflow-in-evalfun.patch
+@@ -0,0 +1,65 @@
++From: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++Date: Tue, 16 Jun 2026 12:19:27 +0900
++Subject: [PATCH] ash: fix stack overflow in evalfun()
++
++Recursive shell functions can repeatedly enter evalfun() until the
++process stack is exhausted. Track active shell function calls and raise a
++normal shell error when the recursion limit is reached.
++
++The counter is decremented through the existing funcdone cleanup path so
++errors raised from inside the function body unwind it correctly.
++
++Signed-off-by: Sanghyun Park <sanghyun.park.cnu@gmail.com>
++[CVE-2026-38755; not merged upstream as of 2026-10-28, posted at
++ https://lists.busybox.net/pipermail/busybox/2026-June/092354.html and
++ carried by Debian busybox 1:1.38.0-3; INTON context changed to INT_ON
++ for 1.37.0]
++---
++ shell/ash.c | 8 ++++++++
++ 1 file changed, 8 insertions(+)
++
++--- a/shell/ash.c
+++++ b/shell/ash.c
++@@ -414,6 +414,7 @@ struct globals_misc {
++ 	int shlvl;
++ #define rootshell (!shlvl)
++ 	int errlinno;
+++	unsigned func_depth;
++ 
++ 	char *minusc;  /* argument to -c option */
++ 
++@@ -506,6 +507,7 @@ extern struct globals_misc *BB_GLOBAL_CO
++ #define rootpid     (G_misc.rootpid    )
++ #define shlvl       (G_misc.shlvl      )
++ #define errlinno    (G_misc.errlinno   )
+++#define func_depth  (G_misc.func_depth )
++ #define minusc      (G_misc.minusc     )
++ #define curdir      (G_misc.curdir     )
++ #define physdir     (G_misc.physdir    )
++@@ -9928,6 +9930,10 @@ evalfun(struct funcnode *func, int argc,
++ 	int savefuncline;
++ 	char *savefuncname;
++ 	char *savetrap = NULL;
+++	enum { MAX_ASH_FUNC_DEPTH = 1000 };
+++
+++	if (func_depth >= MAX_ASH_FUNC_DEPTH)
+++		ash_msg_and_raise_error("function recursion limit exceeded");
++ 
++ 	if (!Eflag) {
++ 		savetrap = trap[NTRAP_ERR];
++@@ -9946,6 +9952,7 @@ evalfun(struct funcnode *func, int argc,
++ 	exception_handler = &jmploc;
++ 	shellparam.malloced = 0;
++ 	func->count++;
+++	func_depth++;
++ 	funcname = func->n.ndefun.text;
++ 	funcline = func->n.ndefun.linno;
++ 	INT_ON;
++@@ -9967,6 +9974,7 @@ evalfun(struct funcnode *func, int argc,
++ 	}
++ 	funcline = savefuncline;
++ 	lineno = savelineno;
+++	func_depth--;
++ 	freefunc(func);
++ 	freeparam(&shellparam);
++ 	shellparam = saveparam;
+-- 
+2.51.0

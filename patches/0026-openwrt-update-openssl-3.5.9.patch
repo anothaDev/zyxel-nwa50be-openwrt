@@ -1,0 +1,95 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] openssl: update to 3.5.9 security release
+SPDX-License-Identifier: GPL-2.0-only
+
+Update to OpenSSL 3.5.9 from the 2026-09-29 advisory, fixing CVE-2026-84782
+and CVE-2026-35189, -54872, -54875, -72897, -75805, -75806, -77696, as in
+OpenWrt 25.12 e594c1dbf3a1. Also take c9e33c746791, which drops the patch 010
+AES-GCM-SIV hunk that bypassed 3.5.8's tag check. QUIC stays disabled (0016).
+
+---
+ package/libs/openssl/Makefile                                 |  4 ++--
+ package/libs/openssl/patches/010-fix-aes-gcm-siv-cipher.patch | 38 +++++++-------------------------------
+ 2 files changed, 9 insertions(+), 33 deletions(-)
+
+diff --git a/package/libs/openssl/Makefile b/package/libs/openssl/Makefile
+index 60c0786..1207421 100644
+--- a/package/libs/openssl/Makefile
++++ b/package/libs/openssl/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=openssl
+-PKG_VERSION:=3.5.8
++PKG_VERSION:=3.5.9
+ PKG_RELEASE:=1
+ PKG_BUILD_FLAGS:=no-mips16 gc-sections no-lto
+ 
+@@ -21,7 +21,7 @@ PKG_SOURCE_URL:= \
+ 	https://www.openssl.org/source/old/$(PKG_BASE)/ \
+ 	https://github.com/openssl/openssl/releases/download/$(PKG_NAME)-$(PKG_VERSION)/
+ 
+-PKG_HASH:=a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
++PKG_HASH:=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+ 
+ PKG_LICENSE:=Apache-2.0
+ PKG_LICENSE_FILES:=LICENSE.txt
+diff --git a/package/libs/openssl/patches/010-fix-aes-gcm-siv-cipher.patch b/package/libs/openssl/patches/010-fix-aes-gcm-siv-cipher.patch
+index deca8f1..5d079b2 100644
+--- a/package/libs/openssl/patches/010-fix-aes-gcm-siv-cipher.patch
++++ b/package/libs/openssl/patches/010-fix-aes-gcm-siv-cipher.patch
+@@ -1,45 +1,21 @@
+ From: Felix Fietkau <nbd@nbd.name>
+ Date: Mon, 1 Dec 2025 16:22:17 +0000
+-Subject: [PATCH] providers/implementations/ciphers: fix AES-GCM-SIV and
+- AES-SIV with zero-length messages
++Subject: [PATCH] providers/implementations/ciphers: fix AES-SIV with
++ zero-length messages
+ 
+-When ossl_aes_gcm_siv_cipher() or siv_cipher() is called with in=NULL
+-for zero-length input, the hw->cipher function interprets this as a
+-finalization request and calls the finish function instead of
+-encrypt/decrypt. This causes the authentication tag to never be computed
+-for zero-length messages, resulting in decryption verification failures.
++When siv_cipher() is called with in=NULL for zero-length input, the
++hw->cipher function interprets this as a finalization request and calls
++the finish function instead of encrypt/decrypt. This causes the
++authentication tag to never be computed for zero-length messages,
++resulting in decryption verification failures.
+ 
+ Fix this by substituting a static empty byte address when in is NULL,
+ ensuring hw->cipher always receives a non-NULL pointer from Update calls
+ and correctly routes to the encrypt/decrypt path.
+ 
+-For AES-GCM-SIV, this is a different fix than upstream commit
+-f1a4f0368b73 ("make aes-gcm-siv work with zero-length messages") which
+-removed early-return and length checks that don't exist in 3.5.x.
+-
+ Signed-off-by: Felix Fietkau <nbd@nbd.name>
+ 
+ ---
+---- a/providers/implementations/ciphers/cipher_aes_gcm_siv.c
+-+++ b/providers/implementations/ciphers/cipher_aes_gcm_siv.c
+-@@ -140,6 +140,7 @@ static int ossl_aes_gcm_siv_cipher(void
+- {
+-     PROV_AES_GCM_SIV_CTX *ctx = (PROV_AES_GCM_SIV_CTX *)vctx;
+-     int error = 0;
+-+    static const unsigned char empty;
+- 
+-     if (!ossl_prov_is_running())
+-         return 0;
+-@@ -149,6 +150,9 @@ static int ossl_aes_gcm_siv_cipher(void
+-         return 0;
+-     }
+- 
+-+    if (in == NULL)
+-+        in = &empty;
+-+
+-     error |= !ctx->hw->cipher(ctx, out, in, inl);
+- 
+-     if (outl != NULL && !error)
+ --- a/providers/implementations/ciphers/cipher_aes_siv.c
+ +++ b/providers/implementations/ciphers/cipher_aes_siv.c
+ @@ -114,6 +114,7 @@ static int siv_cipher(void *vctx, unsign
+-- 
+2.51.0

@@ -1,0 +1,92 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] luci: rpcd symlink ACL paths and escaped log fields
+SPDX-License-Identifier: Apache-2.0
+
+Backport two luci openwrt-25.12 commits:
+
+  58d43e57af rpcd: fix file ACLs for symlinked /proc paths. The rpcd
+             update in 0050 re-checks file ACLs against the resolved
+             path, and /proc/mounts resolves to /proc/<pid>/mounts, so
+             without the added patterns LuCI's mount view is denied.
+  a03941bdd4 luci-base: dispatcher.uc: escape the URL path and user name
+             when logging, so a crafted login request cannot inject log
+             lines.
+
+Applies after 0014, 0018, 0020 and 0039.
+
+---
+ .../root/usr/share/rpcd/acl.d/luci-app-ocserv.json               | 1 +
+ .../root/usr/share/rpcd/acl.d/luci-app-statistics.json           | 1 +
+ .../root/usr/share/rpcd/acl.d/luci-mod-system.json               | 1 +
+ 3 files changed, 3 insertions(+)
+ modules/luci-base/ucode/dispatcher.uc | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/applications/luci-app-ocserv/root/usr/share/rpcd/acl.d/luci-app-ocserv.json b/applications/luci-app-ocserv/root/usr/share/rpcd/acl.d/luci-app-ocserv.json
+index 71740a28b1..d0d16cb183 100644
+--- a/applications/luci-app-ocserv/root/usr/share/rpcd/acl.d/luci-app-ocserv.json
++++ b/applications/luci-app-ocserv/root/usr/share/rpcd/acl.d/luci-app-ocserv.json
+@@ -5,6 +5,7 @@
+ 			"file": {
+ 				"/etc/ocserv/*": [ "read" ],
+ 				"/proc/net/ipv6_route": [ "read" ],
++				"/proc/*/net/ipv6_route": [ "read" ],
+ 				"/usr/bin/certtool --hash sha256 --key-id --infile /etc/ocserv/server-cert.pem": ["exec"],
+ 				"/usr/bin/occtl show users": ["exec"],
+ 				"/usr/bin/occtl --json show users": ["exec"],
+diff --git a/applications/luci-app-statistics/root/usr/share/rpcd/acl.d/luci-app-statistics.json b/applications/luci-app-statistics/root/usr/share/rpcd/acl.d/luci-app-statistics.json
+index 573d0beb3a..e9deab038d 100644
+--- a/applications/luci-app-statistics/root/usr/share/rpcd/acl.d/luci-app-statistics.json
++++ b/applications/luci-app-statistics/root/usr/share/rpcd/acl.d/luci-app-statistics.json
+@@ -10,6 +10,7 @@
+ 				"/proc/filesystems": [ "read" ],
+ 				"/proc/interrupts": [ "read" ],
+ 				"/proc/mounts": [ "read" ],
++				"/proc/*/mounts": [ "read" ],
+ 				"/proc/partitions": [ "read" ],
+ 				"/proc/sys/kernel/hostname": [ "read" ],
+ 				"/tmp/rrd": [ "list" ],
+diff --git a/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json b/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json
+index 379d89fc6f..395c03a392 100644
+--- a/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json
++++ b/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json
+@@ -151,6 +151,7 @@
+ 				"/etc/sysupgrade.conf": [ "read" ],
+ 				"/lib/upgrade/platform.sh": [ "list" ],
+ 				"/proc/mounts": [ "read" ],
++				"/proc/*/mounts": [ "read" ],
+ 				"/proc/mtd": [ "read" ],
+ 				"/proc/partitions": [ "read" ],
+ 				"/proc/sys/kernel/hostname": [ "read" ],
+diff --git a/modules/luci-base/ucode/dispatcher.uc b/modules/luci-base/ucode/dispatcher.uc
+index 0b31a38a10..99712b85e7 100644
+--- a/modules/luci-base/ucode/dispatcher.uc
++++ b/modules/luci-base/ucode/dispatcher.uc
+@@ -11,7 +11,7 @@ import { openlog, syslog, closelog, LOG_INFO, LOG_WARNING, LOG_AUTHPRIV } from '
+ import { hash, load_catalog, change_catalog, translate, ntranslate, getuid } from 'luci.core';
+ import { revision as luciversion, branch as luciname } from 'luci.version';
+ import { default as LuCIRuntime } from 'luci.runtime';
+-import { urldecode } from 'luci.http';
++import { urldecode, urlencode } from 'luci.http';
+ 
+ let ubus = connect();
+ let uci = cursor();
+@@ -508,14 +508,14 @@ function session_setup(user, pass, path) {
+ 			ubus_rpc_session: login.ubus_rpc_session,
+ 			values: { token: randomid(16) }
+ 		});
+-		syslog(LOG_INFO|LOG_AUTHPRIV, sprintf("luci: accepted login on /%s for %s from %s",
+-			join('/', path), user || "?", http.getenv("REMOTE_ADDR") || "?"));
++		syslog(LOG_INFO|LOG_AUTHPRIV, "luci: accepted login on /%s for %s from %s",
++			join('/', map(path, p => urlencode(p))), urlencode(user || "?"), http.getenv("REMOTE_ADDR") || "?");
+ 
+ 		return session_retrieve(login.ubus_rpc_session);
+ 	}
+ 
+-	syslog(LOG_WARNING|LOG_AUTHPRIV, sprintf("luci: failed login on /%s for %s from %s",
+-		join('/', path), user || "?", http.getenv("REMOTE_ADDR") || "?"));
++	syslog(LOG_WARNING|LOG_AUTHPRIV, "luci: failed login on /%s for %s from %s",
++		join('/', map(path, p => urlencode(p))), urlencode(user || "?"), http.getenv("REMOTE_ADDR") || "?");
+ 
+ 	closelog();
+ }
