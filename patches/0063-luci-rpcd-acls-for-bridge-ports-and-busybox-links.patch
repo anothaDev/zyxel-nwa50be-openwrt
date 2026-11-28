@@ -1,0 +1,43 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] luci-mod-network: grant the resolved paths rpcd now checks
+SPDX-License-Identifier: Apache-2.0
+
+rpcd since 2026-07-19 (e37ed9d, taken with 0050) resolves symlinks in a
+requested path and checks the session's permissions against the resolved
+path as well. Two LuCI network views read through symlinks whose targets
+were not granted:
+
+- Bridge port options read /sys/class/net/<dev>/brport/<name>, which
+  resolves below /sys/devices. The read failed and the view showed
+  learning, unicast flooding and port isolation as "automatic (disabled)"
+  whatever the real state.
+- Diagnostics tests for /bin/ping6 and /bin/traceroute6 with stat. Both
+  are links to busybox here, so the test failed and the IPv6 variants
+  were not offered.
+
+Grant read on the resolved bridge port paths and stat ("list") on
+/bin/busybox. Running the tools is unaffected: rpcd does not resolve the
+path it executes. Upstream LuCI has the same gap as of 2026-11-25
+(master 8d1aecd021); 0055 carries its earlier fix for /proc paths.
+
+diff --git a/modules/luci-mod-network/root/usr/share/rpcd/acl.d/luci-mod-network.json b/modules/luci-mod-network/root/usr/share/rpcd/acl.d/luci-mod-network.json
+--- a/modules/luci-mod-network/root/usr/share/rpcd/acl.d/luci-mod-network.json
++++ b/modules/luci-mod-network/root/usr/share/rpcd/acl.d/luci-mod-network.json
+@@ -9,7 +9,8 @@
+ 				"/proc/sys/net/ipv6/conf/*/hop_limit": [ "read" ],
+ 				"/usr/libexec/luci-peeraddr": [ "exec" ],
+ 				"/proc/sys/net/ipv[46]/conf/*": [ "read" ],
+-				"/sys/class/net/*/brport/*": [ "read" ]
++				"/sys/class/net/*/brport/*": [ "read" ],
++				"/sys/devices/*/net/*/brport/*": [ "read" ]
+ 			},
+ 			"ubus": {
+ 				"file": [ "exec" ],
+@@ -66,6 +67,7 @@
+ 		"description": "Grant access to network diagnostic tools",
+ 		"read": {
+ 			"file": {
++				"/bin/busybox": [ "list" ],
+ 				"/bin/ping": [ "exec" ],
+ 				"/bin/ping6": [ "exec", "list" ],
+ 				"/bin/traceroute": [ "exec" ],

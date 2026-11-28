@@ -1,0 +1,497 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] dropbear: backport 2026.92 and 2026.93 security fixes
+SPDX-License-Identifier: GPL-2.0-only
+
+Add the security-relevant fixes of dropbear 2026.92 and 2026.93 to
+2025.89 as patch files on top of 0029, instead of a version bump (OpenWrt
+main took 2026.92 in 49096a9c48 and 2026.94 in e9a6e45556, which also
+brings the whole 2026.90 feature set and a reworked patch stack).
+Upstream commits: 8d8e1930 (a long authorized_keys line continued as a
+new line, which could bypass restrictions such as command=), 23ec7828
+(-t with -B), d35cf537 (unbounded KEX reply queue), 10d1b725 (permitopen
+port range), edd5fa1e (packet length wraparound) and e968c1a6 with
+08729e21 (scp progress meter filename escaping; the package builds scp
+with SCPPROGRESS=1). Upstream CHANGES lists no CVE ids for them.
+100-pubkey_path.patch is refreshed for the new offsets.
+---
+ package/network/services/dropbear/Makefile                                                                |   2 +-
+ package/network/services/dropbear/patches/0009-Check-packet-length-for-integer-overflow.patch             |  38 ++++++++++++++++++++++++++
+ package/network/services/dropbear/patches/0010-Disallow-t-two-factor-with-B-blank-passwords.patch         |  25 ++++++++++++++++++
+ package/network/services/dropbear/patches/0011-Limit-the-kex-deferred-packet-queue-length.patch           |  95 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/network/services/dropbear/patches/0012-Require-valid-port-for-authorized_keys-permitopen.patch    |  26 ++++++++++++++++++
+ package/network/services/dropbear/patches/0013-Avoid-splitting-long-authorized_keys-lines.patch           | 125 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/network/services/dropbear/patches/0014-scp-escape-control-characters-from-printed-filenames.patch |  76 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ package/network/services/dropbear/patches/100-pubkey_path.patch                                           |   6 ++---
+ 8 files changed, 389 insertions(+), 4 deletions(-)
+ create mode 100644 package/network/services/dropbear/patches/0009-Check-packet-length-for-integer-overflow.patch
+ create mode 100644 package/network/services/dropbear/patches/0010-Disallow-t-two-factor-with-B-blank-passwords.patch
+ create mode 100644 package/network/services/dropbear/patches/0011-Limit-the-kex-deferred-packet-queue-length.patch
+ create mode 100644 package/network/services/dropbear/patches/0012-Require-valid-port-for-authorized_keys-permitopen.patch
+ create mode 100644 package/network/services/dropbear/patches/0013-Avoid-splitting-long-authorized_keys-lines.patch
+ create mode 100644 package/network/services/dropbear/patches/0014-scp-escape-control-characters-from-printed-filenames.patch
+
+diff --git a/package/network/services/dropbear/Makefile b/package/network/services/dropbear/Makefile
+index 0ada2ed..37ac362 100644
+--- a/package/network/services/dropbear/Makefile
++++ b/package/network/services/dropbear/Makefile
+@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=dropbear
+ PKG_VERSION:=2025.89
+-PKG_RELEASE:=3
++PKG_RELEASE:=4
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+ PKG_SOURCE_URL:= \
+diff --git a/package/network/services/dropbear/patches/0009-Check-packet-length-for-integer-overflow.patch b/package/network/services/dropbear/patches/0009-Check-packet-length-for-integer-overflow.patch
+new file mode 100644
+index 0000000..fe6411f
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0009-Check-packet-length-for-integer-overflow.patch
+@@ -0,0 +1,38 @@
++From 0faf4c9b674a9fe912cbd594088d2b81acfa2731 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Mon, 8 Jun 2026 21:30:36 +0800
++Subject: [PATCH 1/6] Check packet length for integer overflow
++
++The packet length provided by a peer could wrap around calculating
++"len", which would then pass the length check. Also check "plen"
++directly.
++
++This doesn't have any functional effect, since subsequent buf_getptr()
++and buf_getwriteptr() would catch the incorrect length before use in
++decrypt_packet().
++
++Reported by Yiyi Wang, Tsinghua University
++
++(cherry picked from commit edd5fa1ef9bbdc759ac8eb90552f9e87ce220f87)
++---
++ src/packet.c | 6 +++---
++ 1 file changed, 3 insertions(+), 3 deletions(-)
++
++--- a/src/packet.c
+++++ b/src/packet.c
++@@ -278,12 +278,12 @@ static int read_packet_init() {
++ 
++ 	TRACE2(("packet size is %u, block %u mac %u", len, blocksize, macsize))
++ 
++-
++-	/* check packet length */
+++	/* check packet length. plen max to catch integer wraparound. */
++ 	if ((len > RECV_MAX_PACKET_LEN) ||
+++	    (plen > RECV_MAX_PACKET_LEN) ||
++ 		(plen < blocksize) ||
++ 		(plen % blocksize != 0)) {
++-		dropbear_exit("Integrity error (bad packet size %u)", len);
+++		dropbear_exit("Integrity error (bad packet size %u)", plen);
++ 	}
++ 
++ 	if (len > ses.readbuf->size) {
+diff --git a/package/network/services/dropbear/patches/0010-Disallow-t-two-factor-with-B-blank-passwords.patch b/package/network/services/dropbear/patches/0010-Disallow-t-two-factor-with-B-blank-passwords.patch
+new file mode 100644
+index 0000000..15ff870
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0010-Disallow-t-two-factor-with-B-blank-passwords.patch
+@@ -0,0 +1,25 @@
++From ef1284c07ebfaa7ec194a20ba263878f576dc594 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Tue, 16 Jun 2026 10:21:05 +0800
++Subject: [PATCH 2/6] Disallow -t (two factor) with -B (blank passwords)
++
++The blank password option took precedence, the options don't really make
++sense together.
++
++(cherry picked from commit 23ec78285639edf068d86bb96f91cba755039740)
++---
++ src/svr-runopts.c | 3 +++
++ 1 file changed, 3 insertions(+)
++
++--- a/src/svr-runopts.c
+++++ b/src/svr-runopts.c
++@@ -468,6 +468,9 @@ void svr_getopts(int argc, char ** argv) {
++ 	if (svr_opts.multiauthmethod && svr_opts.noauthpass) {
++ 		dropbear_exit("-t and -s are incompatible");
++ 	}
+++	if (svr_opts.multiauthmethod && svr_opts.allowblankpass) {
+++		dropbear_exit("-t and -B are incompatible");
+++	}
++ 
++ 	if (strlen(svr_opts.authorized_keys_dir) == 0) {
++ 		dropbear_exit("Bad -D");
+diff --git a/package/network/services/dropbear/patches/0011-Limit-the-kex-deferred-packet-queue-length.patch b/package/network/services/dropbear/patches/0011-Limit-the-kex-deferred-packet-queue-length.patch
+new file mode 100644
+index 0000000..e656340
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0011-Limit-the-kex-deferred-packet-queue-length.patch
+@@ -0,0 +1,95 @@
++From 19d8b33f032086869433bb5859eb04a98ee5243d Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Fri, 3 Jul 2026 19:56:22 +0800
++Subject: [PATCH 3/6] Limit the kex deferred packet queue length
++
++During a key exchange, non-transport sent packets are enqueued since
++they are not allowed to be sent. The queue is theoretically unbounded,
++which could cause unbounded memory use.
++
++In normal operation not many packets would be expected from a peer
++before a reply KEXINIT, but a coincidental flood of channel open
++requests from a client at the same instant as a rekey begins could cause
++numerous replies. Perhaps that could happen with hectic SOCKS forwarding,
++so the limit is set to MAX_CHANNELS.
++Only reply packets would be enqueue, all of those are relatively small.
++
++The rekey KEX can't be directly triggered by a malicious peer, it has to
++wait for a rekey KEXINIT to be sent by Dropbear (client or server),
++after 1GB of data or 8 hours. It can only occur post-auth, none of the
++allowed pre-auth packets can trigger an enqueued reply.
++Memory is used by the session dropbear process, so the OOM killer would
++usually sort it out.
++
++(cherry picked from commit d35cf53782040ab11ea38369244cdbe92fc85b9a)
++---
++ src/common-session.c | 1 +
++ src/packet.c         | 8 ++++++++
++ src/session.h        | 1 +
++ src/sysoptions.h     | 4 ++++
++ 4 files changed, 14 insertions(+)
++
++--- a/src/common-session.c
+++++ b/src/common-session.c
++@@ -117,6 +117,7 @@ void common_session_init(int sock_in, int sock_out) {
++ 	ses.lastpacket = 0;
++ 	ses.reply_queue_head = NULL;
++ 	ses.reply_queue_tail = NULL;
+++	ses.reply_queue_len = 0;
++ 
++ 	/* set all the algos to none */
++ 	ses.keys = (struct key_context*)m_malloc(sizeof(struct key_context));
++--- a/src/packet.c
+++++ b/src/packet.c
++@@ -477,6 +477,12 @@ static int packet_is_okay_kex(unsigned char type) {
++ 
++ static void enqueue_reply_packet() {
++ 	struct packetlist * new_item = NULL;
+++
+++	if (ses.reply_queue_len > MAX_DEFER_REPLY_QUEUE) {
+++		/* This limit should never be reached by a normal peer. */
+++		dropbear_exit("Full reply queue");
+++	}
+++
++ 	new_item = m_malloc(sizeof(struct packetlist));
++ 	new_item->next = NULL;
++ 	
++@@ -490,6 +496,7 @@ static void enqueue_reply_packet() {
++ 		ses.reply_queue_head = new_item;
++ 	}
++ 	ses.reply_queue_tail = new_item;
+++	ses.reply_queue_len++;
++ }
++ 
++ void maybe_flush_reply_queue() {
++@@ -512,6 +519,7 @@ void maybe_flush_reply_queue() {
++ 		encrypt_packet();
++ 	}
++ 	ses.reply_queue_head = ses.reply_queue_tail = NULL;
+++	ses.reply_queue_len = 0;
++ }
++ 	
++ /* encrypt the writepayload, putting into writebuf, ready for write_packet()
++--- a/src/session.h
+++++ b/src/session.h
++@@ -209,6 +209,7 @@ struct sshsession {
++ 	/* a list of queued replies that should be sent after a KEX has
++ 	   concluded (ie, while dataallowed was unset)*/
++ 	struct packetlist *reply_queue_head, *reply_queue_tail;
+++	size_t reply_queue_len;
++ 
++ 	void(*remoteclosed)(void); /* A callback to handle closure of the
++ 									  remote connection */
++--- a/src/sysoptions.h
+++++ b/src/sysoptions.h
++@@ -253,6 +253,10 @@
++ #define MAX_STRING_LEN (MAX(MAX_CMD_LEN, 2400)) /* Sun SSH needs 2400 for algos,
++                                                    MAX_CMD_LEN is usually longer */
++ 
+++/* Count of packets ot enqueue deferring while a KEX is in progress.
+++ * We wouldn't expect to be anywhere near one-per-channel in normal
+++ * operation, but all replies are small so this is a reasonable upper bound */
+++#define MAX_DEFER_REPLY_QUEUE MAX_CHANNELS
++ 
++ /* Key type sizes are ordered large to small, all are
++  determined empirically, and rounded up */
+diff --git a/package/network/services/dropbear/patches/0012-Require-valid-port-for-authorized_keys-permitopen.patch b/package/network/services/dropbear/patches/0012-Require-valid-port-for-authorized_keys-permitopen.patch
+new file mode 100644
+index 0000000..4e89e18
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0012-Require-valid-port-for-authorized_keys-permitopen.patch
+@@ -0,0 +1,26 @@
++From 187fb0b96ff1b377f0d9a4dd3971bf1ff0c43e43 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Fri, 3 Jul 2026 22:44:41 +0800
++Subject: [PATCH 4/6] Require valid port for authorized_keys permitopen
++
++A permitopen option specified in authorized_keys could be written with
++an invalid port value. 4294967295 or -1 would be accepted as "any port".
++Avoid any confusion by checking it's a valid TCP port number.
++
++(cherry picked from commit 10d1b725f0fc8171b10b31c4768f661c9db60acb)
++---
++ src/svr-authpubkeyoptions.c | 3 ++-
++ 1 file changed, 2 insertions(+), 1 deletion(-)
++
++--- a/src/svr-authpubkeyoptions.c
+++++ b/src/svr-authpubkeyoptions.c
++@@ -276,7 +276,8 @@ svr_parse_pubkey_options(buffer *options_buf, int line_num, const char* filename
++ 							valid_option = 1;
++ 							entry->port = PUBKEY_OPTIONS_ANY_PORT;
++ 							TRACE(("local port forwarding allowed to host '%s'", entry->host));
++-						} else if (m_str_to_uint(portstring, &entry->port) == DROPBEAR_SUCCESS) {
+++						} else if (m_str_to_uint(portstring, &entry->port) == DROPBEAR_SUCCESS
+++							&& entry->port <= 65535) {
++ 							valid_option = 1;
++ 							TRACE(("local port forwarding allowed to host '%s' and port '%u'",
++ 									entry->host, entry->port));
+diff --git a/package/network/services/dropbear/patches/0013-Avoid-splitting-long-authorized_keys-lines.patch b/package/network/services/dropbear/patches/0013-Avoid-splitting-long-authorized_keys-lines.patch
+new file mode 100644
+index 0000000..36b7368
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0013-Avoid-splitting-long-authorized_keys-lines.patch
+@@ -0,0 +1,125 @@
++From 3e48d9804a1629be1ea119d5d5a73764700f1528 Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Sun, 5 Jul 2026 19:04:54 +0800
++Subject: [PATCH 5/6] Avoid splitting long authorized_keys lines
++
++When reading text files, a long line would finish parsing then the
++next iteration would continue with the tail of the line.
++Instead the line should be skipped entirely.
++Line lengths are now limited to 10000 characters, file parsing will
++stop if that limit is hit.
++
++Previously if external programs created authorized_keys entries from
++untrusted sources, that could have allowed bypass of public key
++restrictions or other confusion.
++
++(cherry picked from commit 8d8e1930b866eb44135ae393a793cbeb03b6b9d6)
++---
++ src/dbutil.c         | 48 +++++++++++++++++++++++---------------------
++ src/svr-authpubkey.c |  8 ++++++--
++ src/sysoptions.h     |  3 +++
++ 3 files changed, 34 insertions(+), 25 deletions(-)
++
++--- a/src/dbutil.c
+++++ b/src/dbutil.c
++@@ -520,46 +520,48 @@ out:
++ 	return ret;
++ }
++ 
++-/* get a line from the file into buffer in the style expected for an
+++/* Get a line from the file into buffer in the style expected for an
++  * authkeys file.
++- * Will return DROPBEAR_SUCCESS if data is read, or DROPBEAR_FAILURE on EOF.*/
++-/* Only used for ~/.ssh/known_hosts and ~/.ssh/authorized_keys */
++-#if DROPBEAR_CLIENT || DROPBEAR_SVR_PUBKEY_AUTH
+++ * Will return DROPBEAR_SUCCESS if data is read, or DROPBEAR_FAILURE on EOF/error.*/
+++/* Returns failure if lines are longer than DROPBEAR_MAX_LINE_LENGTH.
+++ * A line that doesn't fit in the buffer returns DROPBEAR_SUCCESS with an empty buffer */
++ int buf_getline(buffer * line, FILE * authfile) {
++ 
++ 	int c = EOF;
+++	unsigned int pos;
+++	int truncated = 0;
++ 
++-	buf_setpos(line, 0);
++ 	buf_setlen(line, 0);
++ 
++-	while (line->pos < line->size) {
++-
+++	for (pos = 0; pos < DROPBEAR_MAX_LINE_LENGTH; pos++) {
++ 		c = fgetc(authfile); /*getc() is weird with some uClibc systems*/
++ 		if (c == EOF || c == '\n' || c == '\r') {
++-			goto out;
+++			break;
++ 		}
++ 
++-		buf_putbyte(line, (unsigned char)c);
+++		if (!truncated && line->len < line->size) {
+++			buf_putbyte(line, (unsigned char)c);
+++		} else {
+++			/* buffer is full, read to EOL and return an empty buffer */
+++			truncated = 1;
+++			buf_setlen(line, 0);
+++		}
++ 	}
++ 
++-	TRACE(("leave getauthline: line too long"))
++-	/* We return success, but the line length will be zeroed - ie we just
++-	 * ignore that line */
++-	buf_setlen(line, 0);
++-
++-out:
++-
++-
++-	/* if we didn't read anything before EOF or error, exit */
++-	if (c == EOF && line->pos == 0) {
+++	if (pos >= DROPBEAR_MAX_LINE_LENGTH) {
+++		/* Didn't reach end of line, the caller shouldn't continue since
+++		 * it will still be mid-line */
++ 		return DROPBEAR_FAILURE;
++-	} else {
++-		buf_setpos(line, 0);
++-		return DROPBEAR_SUCCESS;
++ 	}
++ 
+++	if (c == EOF && line->pos == 0) {
+++		/* Reached EOF, no buffer data */
+++		return DROPBEAR_FAILURE;
+++	}
+++
+++	buf_setpos(line, 0);
+++	return DROPBEAR_SUCCESS;
++ }	
++-#endif
++ 
++ /* make sure that the socket closes */
++ void m_close(int fd) {
++--- a/src/svr-authpubkey.c
+++++ b/src/svr-authpubkey.c
++@@ -68,8 +68,12 @@
++ 
++ #if DROPBEAR_SVR_PUBKEY_AUTH
++ 
++-#define MIN_AUTHKEYS_LINE 10 /* "ssh-rsa AB" - short but doesn't matter */
++-#define MAX_AUTHKEYS_LINE 4200 /* max length of a line in authkeys */
+++/* "ssh-rsa AB" - short but doesn't matter */
+++#define MIN_AUTHKEYS_LINE 10
+++/* Max length of a valid key line in authkeys. A 16384 bit RSA key (ridiculous) is
+++ * 2786 bytes.
+++ * An addition limit DROPBEAR_MAX_LINE_LENGTH (10000) will stop file parsing entirely */
+++#define MAX_AUTHKEYS_LINE 3000
++ 
++ static char * authorized_keys_filepath(void);
++ static int checkpubkey(const char* keyalgo, unsigned int keyalgolen,
++--- a/src/sysoptions.h
+++++ b/src/sysoptions.h
++@@ -452,6 +452,9 @@
++ #define DROPBEAR_MULTI 0
++ #endif
++ 
+++/* To avoid denial of service */
+++#define DROPBEAR_MAX_LINE_LENGTH 10000
+++
++ #if !DROPBEAR_SVR_MULTIUSER && DROPBEAR_SVR_DROP_PRIVS
++ #error DROPBEAR_SVR_DROP_PRIVS needs DROPBEAR_SVR_MULTIUSER
++ #endif
+diff --git a/package/network/services/dropbear/patches/0014-scp-escape-control-characters-from-printed-filenames.patch b/package/network/services/dropbear/patches/0014-scp-escape-control-characters-from-printed-filenames.patch
+new file mode 100644
+index 0000000..856034d
+--- /dev/null
++++ b/package/network/services/dropbear/patches/0014-scp-escape-control-characters-from-printed-filenames.patch
+@@ -0,0 +1,76 @@
++From 0a737afc7bd48952f7ce385160223ceb5c728bbd Mon Sep 17 00:00:00 2001
++From: Matt Johnston <matt@ucc.asn.au>
++Date: Mon, 6 Jul 2026 00:13:03 +0800
++Subject: [PATCH 6/6] scp: escape control characters from printed filenames
++
++When scp is built with SCPPROGRESS=1 (not default) the filenames didn't
++have control characters escaped. A side-effect is that non-ascii
++characters now will no longer be printed, such as utf-8 filenames. This
++is only visual, the real path used for the copy is unchanged.
++
++This uses a copy of cleantext() rather than figuring out linking to
++dbutil.o.
++
++Squashed with the progressmeter.c hunk of 08729e21 ("Fix cleantext() to
++strip control characters"): the range test in the copy of cleantext()
++added by this commit was inverted (|| instead of &&) and kept every
++character.
++
++(cherry picked from commit e968c1a6ffc13ca2245960eff1e1a2d756627b06)
++(cherry picked from commit 08729e21aef920b68e027bfff36f4bf3bd570ebf, progressmeter.c hunk only)
++---
++ src/progressmeter.c | 32 ++++++++++++++++++++++++++++++--
++ 1 file changed, 30 insertions(+), 2 deletions(-)
++
++--- a/src/progressmeter.c
+++++ b/src/progressmeter.c
++@@ -55,7 +55,7 @@ static void update_progress_meter(int);
++ 
++ static time_t start;		/* start progress */
++ static time_t last_update;	/* last progress update */
++-static char *file;		/* name of the file being transferred */
+++static char *file;		/* name of the file being transferred, malloced */
++ static off_t end_pos;		/* ending position of transfer */
++ static off_t cur_pos;		/* transfer position as of last refresh */
++ static volatile off_t *counter;	/* progress counter */
++@@ -235,11 +235,39 @@ update_progress_meter(int ignore)
++ 	errno = save_errno;
++ }
++ 
+++/* Operates in-place turning dirty text (untrusted potentially containing control
+++ * characters) into clean text.
+++ * Only ascii (7 bit) characters are allowed.
+++ * Set allow_whitespace to allow \n and \t. */
+++static void cleantext(char* dirtytext, int allow_whitespace) {
+++
+++	unsigned int i, j;
+++	unsigned char c;
+++
+++	j = 0;
+++	for (i = 0; dirtytext[i] != '\0'; i++) {
+++
+++		c = (unsigned char)dirtytext[i];
+++		/* We can ignore '\r's */
+++		if ((c >= ' ' && c <= '~') || (allow_whitespace && (c == '\n' || c == '\t'))) {
+++			dirtytext[j] = c;
+++			j++;
+++		}
+++	}
+++	/* Null terminate */
+++	dirtytext[j] = '\0';
+++}
+++
++ void
++ start_progress_meter(char *f, off_t filesize, off_t *ctr)
++ {
++ 	start = last_update = time(NULL);
++-	file = f;
+++	if (file) {
+++		xfree(file);
+++		file = NULL;
+++	}
+++	file = xstrdup(f);
+++	cleantext(file, 0);
++ 	end_pos = filesize;
++ 	cur_pos = 0;
++ 	counter = ctr;
+diff --git a/package/network/services/dropbear/patches/100-pubkey_path.patch b/package/network/services/dropbear/patches/100-pubkey_path.patch
+index 8972d16..bd71927 100644
+--- a/package/network/services/dropbear/patches/100-pubkey_path.patch
++++ b/package/network/services/dropbear/patches/100-pubkey_path.patch
+@@ -3,7 +3,7 @@
+ 
+ --- a/src/svr-authpubkey.c
+ +++ b/src/svr-authpubkey.c
+-@@ -80,6 +80,39 @@ static void send_msg_userauth_pk_ok(cons
++@@ -84,6 +84,39 @@ static void send_msg_userauth_pk_ok(cons
+  		const unsigned char* keyblob, unsigned int keybloblen);
+  static int checkfileperm(char * filename);
+  
+@@ -43,7 +43,7 @@
+  /* process a pubkey auth request, sending success or failure message as
+   * appropriate */
+  void svr_auth_pubkey(int valid_user) {
+-@@ -450,16 +483,22 @@ out:
++@@ -454,16 +487,22 @@ out:
+  static char *authorized_keys_filepath() {
+  	size_t len = 0;
+  	char *pathname = NULL, *dir = NULL;
+@@ -69,7 +69,7 @@
+  	m_free(dir);
+  	return pathname;
+  }
+-@@ -563,11 +602,23 @@ out:
++@@ -567,11 +606,23 @@ out:
+   * When this path is inside the user's home dir it checks up to and including
+   * the home dir, otherwise it checks every path component. */
+  static int checkpubkeyperms() {

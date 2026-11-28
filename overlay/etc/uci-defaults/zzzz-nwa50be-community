@@ -158,6 +158,8 @@ uci -q add_list uhttpd.main.listen_https='[::]:443'
 uci -q set uhttpd.main.home='/www'
 uci -q set uhttpd.main.rfc1918_filter='1'
 uci -q set uhttpd.main.max_requests='3'
+# Only one management address is admitted, so it may use every slot.
+uci -q set uhttpd.main.max_requests_per_source='3'
 uci -q set uhttpd.main.max_connections='100'
 uci -q set uhttpd.main.cert='/etc/uhttpd.crt'
 uci -q set uhttpd.main.key='/etc/uhttpd.key'

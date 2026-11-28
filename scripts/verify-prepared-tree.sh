@@ -23,7 +23,7 @@ dts="$tree/feeds/qca-wifi-7/ipq53xx/dts/ipq5332-zyxel-nwa50be.dts"
 overlay="$openwrt/files"
 
 [ -f "$tree/.nwa50be-community-prepared" ]
-[ "$(git -C "$tree" rev-parse HEAD)" = '5b797b292359436ccf17d5d367a46bda75fc260a' ]
+[ "$(git -C "$tree" rev-parse HEAD)" = 'f18e1f560b50998b759a3d837a320d911d7d8584' ]
 [ "$(git -C "$openwrt" rev-parse 'HEAD^{tree}')" = '6dce2f66f457d2f4de0046da03bfd0d85577aba0' ]
 [ "$(git -C "$openwrt" rev-list --count a5652f421c6f6e548fb801a93b2cd2ae13eca631..HEAD)" -eq 125 ]
 
@@ -70,23 +70,85 @@ git -C "$tree" apply --check --reverse "$project/patches/0008-qca-ssdk-shell-kee
 git -C "$tree" apply --check --reverse "$project/patches/0009-qca-nss-phy-ignore-empty-package-probe.patch"
 git -C "$tree" apply --check --reverse "$project/patches/0015-qca-ssdk-qca-keep-profile-files-read-only.patch"
 git -C "$tree" apply --check --reverse "$project/patches/0021-ath12k-balance-stale-peer-lock.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0002-openwrt-refresh-initramfs-payload.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0010-openwrt-neutralize-external-apk-origin.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0011-openwrt-update-uhttpd-security.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0012-openwrt-update-openssl-3.5.8.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0013-openwrt-remove-default-root-password.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0016-openssl-disable-unused-quic.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0019-openwrt-update-umdns-security.patch"
-git -C "$openwrt" apply --check --reverse "$project/patches/0022-openwrt-select-one-tip-release-label.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0024-hostapd-backport-w1fi-2026-1-mlo-validation.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0025-hostapd-backport-w1fi-2026-5-radius-msg-auth.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0038-ipq53xx-keep-pstore-disabled.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0046-ipq53xx-kernel-ipv4-options-rcu-free.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0049-zyxel-validate-hwaddr-keep-hostname.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0052-ipq53xx-kernel-network-fixes.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0061-hostapd-indicate-11be-build-feature.patch"
+git -C "$tree" apply --check --reverse "$project/patches/0062-ipq53xx-kernel-tcp-lookup-and-accept-queue-followups.patch"
+# Patch 0061: LuCI asks "hostapd -v11be" before it offers the BE mode.
+grep -Fq '!strcmp(feat, "11be")' "$tree/feeds/qca-wifi-7/hostapd/src/src/utils/build_features.h"
+# Later roll-forwards edit the same Makefiles as 0011, 0012, and 0019, so
+# check the OpenWrt stack as a whole: replay it onto HEAD in a private index
+# and require the work tree to match.
+stack_index=$(mktemp)
+trap 'rm -f "$stack_index"' EXIT HUP INT TERM
+GIT_INDEX_FILE=$stack_index git -C "$openwrt" read-tree HEAD
+for patch in \
+	0002-openwrt-refresh-initramfs-payload.patch \
+	0010-openwrt-neutralize-external-apk-origin.patch \
+	0011-openwrt-update-uhttpd-security.patch \
+	0012-openwrt-update-openssl-3.5.8.patch \
+	0013-openwrt-remove-default-root-password.patch \
+	0016-openssl-disable-unused-quic.patch \
+	0019-openwrt-update-umdns-security.patch \
+	0022-openwrt-select-one-tip-release-label.patch \
+	0026-openwrt-update-openssl-3.5.9.patch \
+	0027-openwrt-update-uhttpd-security.patch \
+	0028-openwrt-update-umdns-memory-safety.patch \
+	0029-openwrt-backport-dropbear-security.patch \
+	0030-openwrt-busybox-security-backports.patch \
+	0031-openwrt-update-dnsmasq-2.93.patch \
+	0032-openwrt-update-mbedtls-3.6.7.patch \
+	0033-openwrt-update-libpcap-1.10.7.patch \
+	0036-openwrt-update-libevent2-security.patch \
+	0040-toolchain-musl-backport-cve-2026-6042-40200.patch \
+	0041-openwrt-dnsmasq-october-2026-security.patch \
+	0042-openwrt-dropbear-2026-92-93-security.patch \
+	0043-openwrt-busybox-udhcpc-and-tar-fixes.patch \
+	0044-openwrt-zlib-reject-negative-crc32-combine.patch \
+	0045-openwrt-dnsmasq-post-2.93-security-fixes.patch \
+	0047-openwrt-dropbear-2026.94.patch \
+	0048-openwrt-dnsmasq-november-2026-security.patch \
+	0050-openwrt-rpcd-update-2026-10-04.patch \
+	0051-openwrt-ca-certificates-20260816.patch \
+	0053-toolchain-musl-regcomp-cve-2026-107891.patch \
+	0054-openwrt-uhttpd-update-2026-11-05.patch \
+	0056-openwrt-libubox-update-2026-11-03.patch \
+	0058-openwrt-dnsmasq-cache-soa-and-non-address-records.patch \
+	0059-openwrt-busybox-nslookup-length-checks.patch \
+	0060-openwrt-mbedtls-update-3.6.8.patch; do
+	GIT_INDEX_FILE=$stack_index git -C "$openwrt" apply --cached \
+		--whitespace=nowarn "$project/patches/$patch"
+done
+GIT_INDEX_FILE=$stack_index git -C "$openwrt" diff --quiet
+rm -f "$stack_index"
+trap - EXIT HUP INT TERM
 sh "$project/scripts/test-tip-version.sh" "$openwrt/scripts/getver.sh"
 git -C "$openwrt/feeds/packages" apply --check --reverse \
 	"$project/patches/0017-packages-update-cgi-io-security.patch"
+git -C "$openwrt/feeds/packages" apply --check --reverse \
+	"$project/patches/0034-packages-update-curl-security.patch"
+git -C "$openwrt/feeds/packages" apply --check --reverse \
+	"$project/patches/0035-packages-update-nghttp2-security.patch"
+git -C "$openwrt/feeds/packages" apply --check --reverse \
+	"$project/patches/0037-packages-update-libssh-security.patch"
 git -C "$openwrt/feeds/luci" apply --check --reverse \
 	"$project/patches/0014-luci-remove-package-manager-dependency.patch"
 git -C "$openwrt/feeds/luci" apply --check --reverse \
 	"$project/patches/0018-luci-remove-mount-crontab-grant.patch"
 git -C "$openwrt/feeds/luci" apply --check --reverse \
 	"$project/patches/0020-luci-escape-dhcp-lease-fields.patch"
+git -C "$openwrt/feeds/luci" apply --check --reverse \
+	"$project/patches/0039-luci-use-private-ubus-connection-in-workers.patch"
+git -C "$openwrt/feeds/luci" apply --check --reverse \
+	"$project/patches/0055-luci-rpcd-symlink-acls-and-log-escaping.patch"
+git -C "$openwrt/feeds/luci" apply --check --reverse \
+	"$project/patches/0057-luci-session-token-from-urandom.patch"
+git -C "$openwrt/feeds/luci" apply --check --reverse \
+	"$project/patches/0063-luci-rpcd-acls-for-bridge-ports-and-busybox-links.patch"
 git -C "$tree" diff --check
 git -C "$openwrt" diff --check
 git -C "$openwrt/feeds/packages" diff --check
@@ -154,30 +216,53 @@ if grep -Ev '^[[:space:]]*(#|$)' \
 	exit 1
 fi
 test -f "$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
-grep -Fq 'iifname != "eth0" drop' \
+grep -Fq 'hook ingress device eth0 priority -500' \
+	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'meta mark set meta mark | 0x40000000' \
+	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'hook input priority -10' \
+	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
+grep -Fq 'meta mark & 0x40000000 == 0 drop' \
 	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fxq 'destroy table bridge nwa50be_management' \
 	"$overlay/usr/share/nftables.d/ruleset-pre/10-nwa50be-wireless-management.nft"
 grep -Fxq 'ath12k frame_mode=1 cold_boot_cal=0 mlo_capable=0' \
 	"$overlay/etc/modules.d/ath12k"
 
-grep -q '^PKG_SOURCE_VERSION:=60f64bec40c8113cf09815ec377761b1f4f95f22$' \
+grep -q '^PKG_SOURCE_VERSION:=93b05e0b65d91c23c5aa8fdde378df1f174ec71d$' \
 	"$openwrt/package/network/services/uhttpd/Makefile"
-grep -q '^PKG_VERSION:=3.5.8$' "$openwrt/package/libs/openssl/Makefile"
+grep -q '^PKG_VERSION:=3.5.9$' "$openwrt/package/libs/openssl/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=d99f703e4035d03fbcfbada3cb697db346c2b984$' \
+	"$openwrt/package/system/rpcd/Makefile"
+grep -q '^PKG_SOURCE_VERSION:=ff13b89e82e64cdd7853419504e51ec0c7e487e0$' \
+	"$openwrt/package/libs/libubox/Makefile"
+grep -q '^PKG_VERSION:=20260816$' "$openwrt/package/system/ca-certificates/Makefile"
+test -f "$openwrt/toolchain/musl/patches/008-regex-avoid-int-overflow-in-regcomp.patch"
+if grep -q 'cipher_aes_gcm_siv' \
+	"$openwrt/package/libs/openssl/patches/010-fix-aes-gcm-siv-cipher.patch" 2>/dev/null; then
+	echo 'Refusing: OpenSSL patch 010 still reverts the 3.5.8 AES-GCM-SIV fix.' >&2
+	exit 1
+fi
 grep -q '^OPENSSL_OPTIONS:= shared no-tests no-quic$' \
 	"$openwrt/package/libs/openssl/Makefile"
 grep -q '^PKG_SOURCE_VERSION:=31cb3c89f02d918d7f17bf62a80c852fc38a1ca1$' \
 	"$openwrt/feeds/packages/net/cgi-io/Makefile"
-grep -q '^PKG_SOURCE_VERSION:=1b5e7bf1cec775b89f1a6068dc0b9df3593b5986$' \
+grep -q '^PKG_SOURCE_VERSION:=defe7ccfd20281b9ef4dfa45437813386a64f8ba$' \
 	"$openwrt/package/network/services/umdns/Makefile"
 grep -q '^PKG_SOURCE_VERSION:=58eb263d5abe03f8c1280bdfa65a3b052614215d$' \
 	"$openwrt/package/system/procd/Makefile"
 grep -q '^PKG_SOURCE_VERSION:=b9034210bd331749673416c6bf389cccd4e23610$' \
 	"$openwrt/package/utils/jsonfilter/Makefile"
-grep -q '^PKG_SOURCE_VERSION:=d1e90a04ca5adb45643894fe3dc65802aea69e9d$' \
+grep -q '^PKG_SOURCE_VERSION:=e2934931479fe732f076e8e32d551b4042bd06d6$' \
 	"$tree/feeds/ucentral/ucentral-schema/Makefile"
 grep -Fq 'config_add_string uci_section' \
 	"$tree/feeds/qca-wifi-7/wifi-scripts/files/lib/netifd/hostapd.sh"
+
+test -f "$tree/feeds/qca-wifi-7/hostapd/openwrt-patches/services/hostapd/patches/zz-001-hostapd-w1fi-2026-1-mlo-validation.patch"
+if grep -q '^CONFIG_PSTORE' "$tree/feeds/qca-wifi-7/ipq53xx/config-6.6"; then
+	echo 'Refusing: pstore is enabled in the ipq53xx kernel configuration.' >&2
+	exit 1
+fi
 
 "$project/scripts/check-luci-mount-acl.py" \
 	"$openwrt/feeds/luci/modules/luci-mod-system/root/usr/share/rpcd/acl.d/luci-mod-system.json"

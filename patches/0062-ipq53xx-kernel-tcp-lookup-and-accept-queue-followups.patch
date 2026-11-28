@@ -1,0 +1,287 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] ipq53xx: complete the TCP lookup and accept-queue backports
+SPDX-License-Identifier: GPL-2.0-only
+
+Add three linux-6.6.y stable commits that the fixes in 0052 lean on or
+leave open:
+
+  910, 911    inet_ehash_insert() replaces the request socket with the
+              full socket in one step instead of removing one and adding
+              the other. Between those two steps a lockless lookup found
+              neither, and since 908 rejects an unhashed socket and
+              restarts, the lookup could end at the listener and reset a
+              connection that was just being established. 910 is the
+              rculist helper 911 needs (6.6.y ad12d25edbbe and
+              23b2b6af8dc6, both in v6.6.120).
+  912         the request dropped after a failed listener migration is
+              accounted to its own listener, not the new one (6.6.y
+              07d77d774f71, v6.6.142, a fix for the commit 907 builds
+              on). Only reachable when listener migration is on, through
+              net.ipv4.tcp_migrate_req or a reuseport BPF program that
+              selects migration.
+
+All three keep their stable headers. In patch-kernel.sh order they apply
+after 909 on 6.6.88 with TIP's 934 patches at fuzz 0, with line offsets
+only. No later linux-6.6.y commit up to v6.6.163 names any patch of 0052
+or of this set in a Fixes: line, other than 902 for 901.
+
+---
+ ...lace-rcu-and-hlist-nulls-replace-init-rcu.patch | 106 +++++++++++++++++++++
+ ...id-ehash-lookup-race-in-inet-ehash-insert.patch |  89 +++++++++++++++++
+ ...cp-fix-imbalanced-icsk-accept-queue-count.patch |  41 ++++++++
+ 3 files changed, 236 insertions(+)
+
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/910-rculist-add-hlist-nulls-replace-rcu-and-hlist-nulls-replace-init-rcu.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/910-rculist-add-hlist-nulls-replace-rcu-and-hlist-nulls-replace-init-rcu.patch
+new file mode 100644
+index 00000000..b0564d3c
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/910-rculist-add-hlist-nulls-replace-rcu-and-hlist-nulls-replace-init-rcu.patch
+@@ -0,0 +1,106 @@
++From ad12d25edbbeda64f9d44fce230ad351e2544e3f Mon Sep 17 00:00:00 2001
++From: Xuanqiang Luo <luoxuanqiang@kylinos.cn>
++Date: Wed, 15 Oct 2025 10:02:34 +0800
++Subject: [PATCH] rculist: Add hlist_nulls_replace_rcu() and
++ hlist_nulls_replace_init_rcu()
++
++[ Upstream commit 9c4609225ec1cb551006d6a03c7c4ad8cb5584c0 ]
++
++Add two functions to atomically replace RCU-protected hlist_nulls entries.
++
++Keep using WRITE_ONCE() to assign values to ->next and ->pprev, as
++mentioned in the patch below:
++commit efd04f8a8b45 ("rcu: Use WRITE_ONCE() for assignments to ->next for
++rculist_nulls")
++commit 860c8802ace1 ("rcu: Use WRITE_ONCE() for assignments to ->pprev for
++hlist_nulls")
++
++Reviewed-by: Kuniyuki Iwashima <kuniyu@google.com>
++Reviewed-by: Frederic Weisbecker <frederic@kernel.org>
++Reviewed-by: Eric Dumazet <edumazet@google.com>
++Signed-off-by: Xuanqiang Luo <luoxuanqiang@kylinos.cn>
++Link: https://patch.msgid.link/20251015020236.431822-2-xuanqiang.luo@linux.dev
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Stable-dep-of: 1532ed0d0753 ("inet: Avoid ehash lookup race in inet_ehash_insert()")
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ include/linux/rculist_nulls.h | 59 +++++++++++++++++++++++++++++++++++
++ 1 file changed, 59 insertions(+)
++
++diff --git a/include/linux/rculist_nulls.h b/include/linux/rculist_nulls.h
++index 89186c499..c26cb83ca 100644
++--- a/include/linux/rculist_nulls.h
+++++ b/include/linux/rculist_nulls.h
++@@ -52,6 +52,13 @@ static inline void hlist_nulls_del_init_rcu(struct hlist_nulls_node *n)
++ #define hlist_nulls_next_rcu(node) \
++ 	(*((struct hlist_nulls_node __rcu __force **)&(node)->next))
++ 
+++/**
+++ * hlist_nulls_pprev_rcu - returns the dereferenced pprev of @node.
+++ * @node: element of the list.
+++ */
+++#define hlist_nulls_pprev_rcu(node) \
+++	(*((struct hlist_nulls_node __rcu __force **)(node)->pprev))
+++
++ /**
++  * hlist_nulls_del_rcu - deletes entry from hash list without re-initialization
++  * @n: the element to delete from the hash list.
++@@ -152,6 +159,58 @@ static inline void hlist_nulls_add_fake(struct hlist_nulls_node *n)
++ 	n->next = (struct hlist_nulls_node *)NULLS_MARKER(NULL);
++ }
++ 
+++/**
+++ * hlist_nulls_replace_rcu - replace an old entry by a new one
+++ * @old: the element to be replaced
+++ * @new: the new element to insert
+++ *
+++ * Description:
+++ * Replace the old entry with the new one in a RCU-protected hlist_nulls, while
+++ * permitting racing traversals.
+++ *
+++ * The caller must take whatever precautions are necessary (such as holding
+++ * appropriate locks) to avoid racing with another list-mutation primitive, such
+++ * as hlist_nulls_add_head_rcu() or hlist_nulls_del_rcu(), running on this same
+++ * list.  However, it is perfectly legal to run concurrently with the _rcu
+++ * list-traversal primitives, such as hlist_nulls_for_each_entry_rcu().
+++ */
+++static inline void hlist_nulls_replace_rcu(struct hlist_nulls_node *old,
+++					   struct hlist_nulls_node *new)
+++{
+++	struct hlist_nulls_node *next = old->next;
+++
+++	WRITE_ONCE(new->next, next);
+++	WRITE_ONCE(new->pprev, old->pprev);
+++	rcu_assign_pointer(hlist_nulls_pprev_rcu(new), new);
+++	if (!is_a_nulls(next))
+++		WRITE_ONCE(next->pprev, &new->next);
+++}
+++
+++/**
+++ * hlist_nulls_replace_init_rcu - replace an old entry by a new one and
+++ * initialize the old
+++ * @old: the element to be replaced
+++ * @new: the new element to insert
+++ *
+++ * Description:
+++ * Replace the old entry with the new one in a RCU-protected hlist_nulls, while
+++ * permitting racing traversals, and reinitialize the old entry.
+++ *
+++ * Note: @old must be hashed.
+++ *
+++ * The caller must take whatever precautions are necessary (such as holding
+++ * appropriate locks) to avoid racing with another list-mutation primitive, such
+++ * as hlist_nulls_add_head_rcu() or hlist_nulls_del_rcu(), running on this same
+++ * list. However, it is perfectly legal to run concurrently with the _rcu
+++ * list-traversal primitives, such as hlist_nulls_for_each_entry_rcu().
+++ */
+++static inline void hlist_nulls_replace_init_rcu(struct hlist_nulls_node *old,
+++						struct hlist_nulls_node *new)
+++{
+++	hlist_nulls_replace_rcu(old, new);
+++	WRITE_ONCE(old->pprev, NULL);
+++}
+++
++ /**
++  * hlist_nulls_for_each_entry_rcu - iterate over rcu list of given type
++  * @tpos:	the type * to use as a loop cursor.
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/911-inet-avoid-ehash-lookup-race-in-inet-ehash-insert.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/911-inet-avoid-ehash-lookup-race-in-inet-ehash-insert.patch
+new file mode 100644
+index 00000000..83fa1849
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/911-inet-avoid-ehash-lookup-race-in-inet-ehash-insert.patch
+@@ -0,0 +1,89 @@
++From 23b2b6af8dc67ce1446a97e506d3508bdfc12070 Mon Sep 17 00:00:00 2001
++From: Xuanqiang Luo <luoxuanqiang@kylinos.cn>
++Date: Wed, 15 Oct 2025 10:02:35 +0800
++Subject: [PATCH] inet: Avoid ehash lookup race in inet_ehash_insert()
++
++[ Upstream commit 1532ed0d0753c83e72595f785f82b48c28bbe5dc ]
++
++Since ehash lookups are lockless, if one CPU performs a lookup while
++another concurrently deletes and inserts (removing reqsk and inserting sk),
++the lookup may fail to find the socket, an RST may be sent.
++
++The call trace map is drawn as follows:
++   CPU 0                           CPU 1
++   -----                           -----
++				inet_ehash_insert()
++                                spin_lock()
++                                sk_nulls_del_node_init_rcu(osk)
++__inet_lookup_established()
++	(lookup failed)
++                                __sk_nulls_add_node_rcu(sk, list)
++                                spin_unlock()
++
++As both deletion and insertion operate on the same ehash chain, this patch
++introduces a new sk_nulls_replace_node_init_rcu() helper functions to
++implement atomic replacement.
++
++Fixes: 5e0724d027f0 ("tcp/dccp: fix hashdance race for passive sessions")
++Reviewed-by: Kuniyuki Iwashima <kuniyu@google.com>
++Reviewed-by: Jiayuan Chen <jiayuan.chen@linux.dev>
++Signed-off-by: Xuanqiang Luo <luoxuanqiang@kylinos.cn>
++Reviewed-by: Eric Dumazet <edumazet@google.com>
++Link: https://patch.msgid.link/20251015020236.431822-3-xuanqiang.luo@linux.dev
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ include/net/sock.h         | 13 +++++++++++++
++ net/ipv4/inet_hashtables.c |  8 ++++++--
++ 2 files changed, 19 insertions(+), 2 deletions(-)
++
++diff --git a/include/net/sock.h b/include/net/sock.h
++index f8e029cc4..d516ed805 100644
++--- a/include/net/sock.h
+++++ b/include/net/sock.h
++@@ -825,6 +825,19 @@ static inline bool sk_nulls_del_node_init_rcu(struct sock *sk)
++ 	return rc;
++ }
++ 
+++static inline bool sk_nulls_replace_node_init_rcu(struct sock *old,
+++						  struct sock *new)
+++{
+++	if (sk_hashed(old)) {
+++		hlist_nulls_replace_init_rcu(&old->sk_nulls_node,
+++					     &new->sk_nulls_node);
+++		__sock_put(old);
+++		return true;
+++	}
+++
+++	return false;
+++}
+++
++ static inline void __sk_add_node(struct sock *sk, struct hlist_head *list)
++ {
++ 	hlist_add_head(&sk->sk_node, list);
++diff --git a/net/ipv4/inet_hashtables.c b/net/ipv4/inet_hashtables.c
++index 60e81f6b1..7292f7017 100644
++--- a/net/ipv4/inet_hashtables.c
+++++ b/net/ipv4/inet_hashtables.c
++@@ -676,8 +676,11 @@ bool inet_ehash_insert(struct sock *sk, struct sock *osk, bool *found_dup_sk)
++ 	spin_lock(lock);
++ 	if (osk) {
++ 		WARN_ON_ONCE(sk->sk_hash != osk->sk_hash);
++-		ret = sk_nulls_del_node_init_rcu(osk);
++-	} else if (found_dup_sk) {
+++		ret = sk_nulls_replace_node_init_rcu(osk, sk);
+++		goto unlock;
+++	}
+++
+++	if (found_dup_sk) {
++ 		*found_dup_sk = inet_ehash_lookup_by_sk(sk, list);
++ 		if (*found_dup_sk)
++ 			ret = false;
++@@ -686,6 +689,7 @@ bool inet_ehash_insert(struct sock *sk, struct sock *osk, bool *found_dup_sk)
++ 	if (ret)
++ 		__sk_nulls_add_node_rcu(sk, list);
++ 
+++unlock:
++ 	spin_unlock(lock);
++ 
++ 	return ret;
+diff --git a/feeds/qca-wifi-7/ipq53xx/patches-6.6/912-tcp-fix-imbalanced-icsk-accept-queue-count.patch b/feeds/qca-wifi-7/ipq53xx/patches-6.6/912-tcp-fix-imbalanced-icsk-accept-queue-count.patch
+new file mode 100644
+index 00000000..2b749575
+--- /dev/null
++++ b/feeds/qca-wifi-7/ipq53xx/patches-6.6/912-tcp-fix-imbalanced-icsk-accept-queue-count.patch
+@@ -0,0 +1,41 @@
++From 07d77d774f711725a2f2411104778d3e3a0dd636 Mon Sep 17 00:00:00 2001
++From: Kuniyuki Iwashima <kuniyu@google.com>
++Date: Wed, 6 May 2026 03:59:19 +0000
++Subject: [PATCH] tcp: Fix imbalanced icsk_accept_queue count.
++
++[ Upstream commit 7eca3292cac7c26dad4c236f51ba225c39a0523f ]
++
++When TCP socket migration happens in reqsk_timer_handler(),
++@sk_listener will be updated with the new listener.
++
++When we call __inet_csk_reqsk_queue_drop(), the listener must
++be the one stored in req->rsk_listener.
++
++The cited commit accidentally replaced oreq->rsk_listener with
++sk_listener, leading to imbalanced icsk_accept_queue count.
++
++Let's pass the correct listener to __inet_csk_reqsk_queue_drop().
++
++Fixes: e8c526f2bdf1 ("tcp/dccp: Don't use timer_pending() in reqsk_queue_unlink().")
++Reported-by: Damiano Melotti <melotti@google.com>
++Signed-off-by: Kuniyuki Iwashima <kuniyu@google.com>
++Link: https://patch.msgid.link/20260506035954.1563147-3-kuniyu@google.com
++Signed-off-by: Jakub Kicinski <kuba@kernel.org>
++Signed-off-by: Sasha Levin <sashal@kernel.org>
++---
++ net/ipv4/inet_connection_sock.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/net/ipv4/inet_connection_sock.c b/net/ipv4/inet_connection_sock.c
++index a6f9192b4..c7a1f763e 100644
++--- a/net/ipv4/inet_connection_sock.c
+++++ b/net/ipv4/inet_connection_sock.c
++@@ -1115,7 +1115,7 @@ no_ownership:
++ 	}
++ 
++ drop:
++-	__inet_csk_reqsk_queue_drop(sk_listener, oreq, true);
+++	__inet_csk_reqsk_queue_drop(oreq->rsk_listener, oreq, true);
++ 	reqsk_put(oreq);
++ }
++ 

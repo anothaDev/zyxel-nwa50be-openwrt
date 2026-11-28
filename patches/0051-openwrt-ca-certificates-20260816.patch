@@ -1,0 +1,69 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] ca-certificates: update to 20260816
+SPDX-License-Identifier: GPL-2.0-only
+
+Take ca-certificates from openwrt-25.12 (8771bd0dfb and 4a686570eb):
+Mozilla bundle 20260816, which drops the distrusted Entrust, Atos
+TrustedRoot 2011, SecureSign Root CA12 and ePKI roots, plus Debian's
+blacklist of "emSign ECC Root CA - G3" and "Comodo AAA Services root".
+The bundle is used for HTTPS downloads (apk, curl, uclient-fetch).
+
+---
+ package/system/ca-certificates/Makefile       |  6 ++---
+ .../patches/0002-blacklist-certs.patch        | 24 +++++++++++++++++++
+ 2 files changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/package/system/ca-certificates/Makefile b/package/system/ca-certificates/Makefile
+index 4c9aa71..a58281b 100644
+--- a/package/system/ca-certificates/Makefile
++++ b/package/system/ca-certificates/Makefile
+@@ -7,8 +7,8 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=ca-certificates
+-PKG_VERSION:=20260223
+-PKG_RELEASE:=1
++PKG_VERSION:=20260816
++PKG_RELEASE:=2
+ PKG_MAINTAINER:=
+ 
+ PKG_LICENSE:=GPL-2.0-or-later MPL-2.0
+@@ -16,7 +16,7 @@ PKG_LICENSE_FILES:=debian/copyright
+ 
+ PKG_SOURCE:=$(PKG_NAME)_$(PKG_VERSION).tar.xz
+ PKG_SOURCE_URL:=@DEBIAN/pool/main/c/ca-certificates
+-PKG_HASH:=2fa2b00d4360f0d14ec51640ae8aea9e563956b95ea786e3c3c01c4eead42b56
++PKG_HASH:=d939bcdd0cb058712cf4175bac76997676eb8b68fe9473765e1b40fb3d5b186a
+ PKG_INSTALL:=1
+ 
+ include $(INCLUDE_DIR)/package.mk
+diff --git a/package/system/ca-certificates/patches/0002-blacklist-certs.patch b/package/system/ca-certificates/patches/0002-blacklist-certs.patch
+new file mode 100644
+index 0000000..74b34a6
+--- /dev/null
++++ b/package/system/ca-certificates/patches/0002-blacklist-certs.patch
+@@ -0,0 +1,24 @@
++From 4a0203e5ce4ce1a064b97387f52ca6a00c97185c Mon Sep 17 00:00:00 2001
++From: Salvatore Bonaccorso <carnil@debian.org>
++Date: Tue, 20 Oct 2026 16:39:15 +0200
++Subject: [PATCH] Blacklist "emSign ECC Root CA - G3" and "Comodo AAA Services
++ root"
++
++Closes: #1151413
++Source: https://salsa.debian.org/debian/ca-certificates/-/commit/4a0203e5ce4ce1a064b97387f52ca6a00c97185c
++---
++ mozilla/blacklist.txt | 5 +++++
++ 1 file changed, 5 insertions(+)
++
++--- a/mozilla/blacklist.txt
+++++ b/mozilla/blacklist.txt
++@@ -3,4 +3,9 @@
++ # Blacklist explicitly distrusted certificates to explicitly ignore them and prevent build errors
++ "Explicitly Distrust DigiNotar Root CA"
++ 
+++# Blacklist "emSign ECC Root CA - G3" (cf. #1151413)
+++"emSign ECC Root CA - G3"
+++# Blacklist "Comodo AAA Services root" (cf. #1151413)
+++"Comodo AAA Services root"
+++
++ # Expired CAs

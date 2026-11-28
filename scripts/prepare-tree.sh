@@ -18,7 +18,7 @@ tree="$1"
 art="$2"
 
 tip_url='https://github.com/Telecominfraproject/wlan-ap.git'
-tip_commit='5b797b292359436ccf17d5d367a46bda75fc260a'
+tip_commit='f18e1f560b50998b759a3d837a320d911d7d8584'
 openwrt_patched_tree='6dce2f66f457d2f4de0046da03bfd0d85577aba0'
 
 verify_upstream_state() {
@@ -85,7 +85,15 @@ for patch in \
 	0008-qca-ssdk-shell-keep-nested-build-serial.patch \
 	0009-qca-nss-phy-ignore-empty-package-probe.patch \
 	0015-qca-ssdk-qca-keep-profile-files-read-only.patch \
-	0021-ath12k-balance-stale-peer-lock.patch; do
+	0021-ath12k-balance-stale-peer-lock.patch \
+	0024-hostapd-backport-w1fi-2026-1-mlo-validation.patch \
+	0025-hostapd-backport-w1fi-2026-5-radius-msg-auth.patch \
+	0038-ipq53xx-keep-pstore-disabled.patch \
+	0046-ipq53xx-kernel-ipv4-options-rcu-free.patch \
+	0049-zyxel-validate-hwaddr-keep-hostname.patch \
+	0052-ipq53xx-kernel-network-fixes.patch \
+	0061-hostapd-indicate-11be-build-feature.patch \
+	0062-ipq53xx-kernel-tcp-lookup-and-accept-queue-followups.patch; do
 	git -C "$tree" apply --check "$project/patches/$patch"
 	git -C "$tree" apply "$project/patches/$patch"
 done
@@ -98,7 +106,32 @@ for patch in \
 	0013-openwrt-remove-default-root-password.patch \
 	0016-openssl-disable-unused-quic.patch \
 	0019-openwrt-update-umdns-security.patch \
-	0022-openwrt-select-one-tip-release-label.patch; do
+	0022-openwrt-select-one-tip-release-label.patch \
+	0026-openwrt-update-openssl-3.5.9.patch \
+	0027-openwrt-update-uhttpd-security.patch \
+	0028-openwrt-update-umdns-memory-safety.patch \
+	0029-openwrt-backport-dropbear-security.patch \
+	0030-openwrt-busybox-security-backports.patch \
+	0031-openwrt-update-dnsmasq-2.93.patch \
+	0032-openwrt-update-mbedtls-3.6.7.patch \
+	0033-openwrt-update-libpcap-1.10.7.patch \
+	0036-openwrt-update-libevent2-security.patch \
+	0040-toolchain-musl-backport-cve-2026-6042-40200.patch \
+	0041-openwrt-dnsmasq-october-2026-security.patch \
+	0042-openwrt-dropbear-2026-92-93-security.patch \
+	0043-openwrt-busybox-udhcpc-and-tar-fixes.patch \
+	0044-openwrt-zlib-reject-negative-crc32-combine.patch \
+	0045-openwrt-dnsmasq-post-2.93-security-fixes.patch \
+	0047-openwrt-dropbear-2026.94.patch \
+	0048-openwrt-dnsmasq-november-2026-security.patch \
+	0050-openwrt-rpcd-update-2026-10-04.patch \
+	0051-openwrt-ca-certificates-20260816.patch \
+	0053-toolchain-musl-regcomp-cve-2026-107891.patch \
+	0054-openwrt-uhttpd-update-2026-11-05.patch \
+	0056-openwrt-libubox-update-2026-11-03.patch \
+	0058-openwrt-dnsmasq-cache-soa-and-non-address-records.patch \
+	0059-openwrt-busybox-nslookup-length-checks.patch \
+	0060-openwrt-mbedtls-update-3.6.8.patch; do
 	git -C "$tree/openwrt" apply --check "$project/patches/$patch"
 	git -C "$tree/openwrt" apply "$project/patches/$patch"
 done
@@ -110,14 +143,22 @@ cp "$project/patches/0007-ucode-fix-const-string-pointers.patch" \
 (
 	cd "$tree/openwrt"
 	./scripts/gen_config.py zyxel_nwa50be
-	git -C feeds/packages apply --check \
-		"$project/patches/0017-packages-update-cgi-io-security.patch"
-	git -C feeds/packages apply \
-		"$project/patches/0017-packages-update-cgi-io-security.patch"
+	for patch in \
+		0017-packages-update-cgi-io-security.patch \
+		0034-packages-update-curl-security.patch \
+		0035-packages-update-nghttp2-security.patch \
+		0037-packages-update-libssh-security.patch; do
+		git -C feeds/packages apply --check "$project/patches/$patch"
+		git -C feeds/packages apply "$project/patches/$patch"
+	done
 	for patch in \
 		0014-luci-remove-package-manager-dependency.patch \
 		0018-luci-remove-mount-crontab-grant.patch \
-		0020-luci-escape-dhcp-lease-fields.patch; do
+		0020-luci-escape-dhcp-lease-fields.patch \
+		0039-luci-use-private-ubus-connection-in-workers.patch \
+		0055-luci-rpcd-symlink-acls-and-log-escaping.patch \
+		0057-luci-session-token-from-urandom.patch \
+		0063-luci-rpcd-acls-for-bridge-ports-and-busybox-links.patch; do
 		git -C feeds/luci apply --check "$project/patches/$patch"
 		git -C feeds/luci apply "$project/patches/$patch"
 	done

@@ -25,8 +25,10 @@ Upstream attribution notices retained for source represented in patch files:
   Copyright (c) 2021-2022, 2024-2025 Qualcomm Innovation Center, Inc.
   All rights reserved.
   The original TIP patch retains Tanya Singh's Signed-off-by attribution.
+- hostapd (`0024`, `0025`):
+  Copyright (c) 2002-2026, Jouni Malinen <j@w1.fi> and contributors.
 
-The LuCI patches (`0014`, `0018`, `0020`) retain this upstream NOTICE:
+The LuCI patches (`0014`, `0018`, `0020`, `0039`, `0055`, `0057`, `0063`) retain this upstream NOTICE:
 
   LuCI - Lua Configuration Interface
   Copyright 2008 Steven Barth <steven@midlink.org>

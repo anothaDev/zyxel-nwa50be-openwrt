@@ -1,0 +1,30 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] luci: use a private ubus connection in forked uhttpd workers
+SPDX-License-Identifier: Apache-2.0
+
+uhttpd loads the ucode handler in its main process, so luci.dispatcher
+opens its ubus connection there, and every forked worker inherits that
+socket while the parent keeps watching it in its event loop. When a worker
+sends a ubus call, the parent can read the reply first and drop it, and
+the worker then waits forever. On the NWA50BE (four CPUs) every request
+that reached a ubus call, including the login page, hung its worker, and
+the stuck workers blocked all later requests. Pinning the process to one
+CPU hid it, which is how it was found.
+
+Connect again at the start of each dispatch so the worker owns the socket
+it waits on.
+
+---
+--- a/modules/luci-base/ucode/dispatcher.uc
++++ b/modules/luci-base/ucode/dispatcher.uc
+@@ -882,6 +882,10 @@
+ dispatch = function(_http, path) {
+ 	http = _http;
+ 
++	// The uhttpd parent preloads this module and watches its ubus socket in
++	// its event loop; use a private connection in the forked worker.
++	ubus = connect();
++
+ 	let version = determine_version();
+ 	let lang = determine_request_language();
+ 

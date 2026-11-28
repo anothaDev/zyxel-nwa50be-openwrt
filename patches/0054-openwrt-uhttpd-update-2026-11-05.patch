@@ -1,0 +1,75 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] uhttpd: update to Git HEAD (2026-11-05)
+SPDX-License-Identifier: GPL-2.0-only
+
+Backport openwrt-25.12 d4cb702258 (main 955b582a66): uhttpd 93b05e0.
+
+  b0aaa81 keep request parsing inside the bytes actually buffered: a
+          chunked body split across packets could make uhttpd abort,
+          before any authentication
+  8e0d492 release a script slot when the peer closes with an unfinished
+          body (GHSA-p2hf-3hpj-hfpc: three such connections blocked LuCI)
+  8791d39 cap script slots per source (-W, max_requests_per_source;
+          default half of max_requests rounded up, so 2 of our 3); extra
+          requests from that source wait in the queue, they are not
+          rejected
+  93b05e0 keep the ubus list response within encodable bounds
+          (GHSA-788h-w5m4-j5xv; this image sets no ubus_prefix)
+
+The first two are reachable on 443 from the wired management address
+before login. Applies after 0011 and 0027.
+
+---
+ package/network/services/uhttpd/Makefile            | 6 +++---
+ package/network/services/uhttpd/files/uhttpd.config | 8 ++++++++
+ package/network/services/uhttpd/files/uhttpd.init   | 1 +
+ 3 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/package/network/services/uhttpd/Makefile b/package/network/services/uhttpd/Makefile
+index 4f8e806f98..ba8233ad6b 100644
+--- a/package/network/services/uhttpd/Makefile
++++ b/package/network/services/uhttpd/Makefile
+@@ -9,9 +9,9 @@ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/uhttpd.git
+-PKG_SOURCE_DATE:=2026-10-19
+-PKG_SOURCE_VERSION:=ca796d7dec5697a2d1a7a42be79677f239b64282
+-PKG_MIRROR_HASH:=6a2fbcc0dbd3f6c9d076037f23b8544356487aea6b00d2a82a3591b09ba4a8e4
++PKG_SOURCE_DATE:=2026-11-05
++PKG_SOURCE_VERSION:=93b05e0b65d91c23c5aa8fdde378df1f174ec71d
++PKG_MIRROR_HASH:=8305c6d4c63aa3c8f6471c55256a378dd9ee3b2898e0b3c096540ba4ec23f2db
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+ PKG_LICENSE:=ISC
+ 
+diff --git a/package/network/services/uhttpd/files/uhttpd.config b/package/network/services/uhttpd/files/uhttpd.config
+index ce76fe6b6b..fb8397aeb5 100644
+--- a/package/network/services/uhttpd/files/uhttpd.config
++++ b/package/network/services/uhttpd/files/uhttpd.config
+@@ -26,6 +26,14 @@ config uhttpd main
+ 	# below the limit again.
+ 	option max_requests 3
+ 
++	# Maximum number of concurrent script requests per source
++	# address. Limits how many of the max_requests script slots a
++	# single client may occupy at once, so that one host cannot
++	# monopolise the script pool and starve other clients.
++	# Defaults to half of max_requests, rounded up; a value of 0
++	# disables the per-source limit.
++#	option max_requests_per_source 2
++
+ 	# Maximum number of concurrent connections.
+ 	# If this number is exceeded, further TCP connection
+ 	# attempts are queued until the number of active
+diff --git a/package/network/services/uhttpd/files/uhttpd.init b/package/network/services/uhttpd/files/uhttpd.init
+index c6e0b210c5..f7b3239413 100755
+--- a/package/network/services/uhttpd/files/uhttpd.init
++++ b/package/network/services/uhttpd/files/uhttpd.init
+@@ -164,6 +164,7 @@ start_instance()
+ 	append_arg "$cfg" tcp_keepalive "-A"
+ 	append_arg "$cfg" error_page "-E"
+ 	append_arg "$cfg" max_requests "-n" 3
++	append_arg "$cfg" max_requests_per_source "-W"
+ 	append_arg "$cfg" max_connections "-N"
+ 
+ 	append_bool "$cfg" no_ubusauth "-a" 0

@@ -1,0 +1,22 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] ipq53xx: keep pstore RAM logging disabled
+SPDX-License-Identifier: GPL-2.0-only
+
+TIP v5.1.1-rc1 enables pstore for EAP105 crash logs in the shared ipq53xx
+kernel configuration. On the NWA50BE that binds ramoops to the 1 MiB region
+at 0x49c00000, which this board has never written from Linux. Keep the
+kernel configuration identical to the image validated on hardware until the
+region is tested with UART attached.
+
+---
+diff --git a/feeds/qca-wifi-7/ipq53xx/config-6.6 b/feeds/qca-wifi-7/ipq53xx/config-6.6
+--- a/feeds/qca-wifi-7/ipq53xx/config-6.6
++++ b/feeds/qca-wifi-7/ipq53xx/config-6.6
+@@ -1412,7 +1412,3 @@
+ # CONFIG_USB_SERIAL_XR is not set
+ CONFIG_GPIO_WATCHDOG=y
+ CONFIG_GPIO_WATCHDOG_ARCH_INITCALL=y
+-CONFIG_PSTORE=y
+-CONFIG_PSTORE_CONSOLE=y
+-CONFIG_PSTORE_PMSG=y
+-CONFIG_PSTORE_RAM=y

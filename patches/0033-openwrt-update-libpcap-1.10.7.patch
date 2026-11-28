@@ -1,0 +1,103 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] libpcap: update to 1.10.7
+SPDX-License-Identifier: GPL-2.0-only
+
+Take the libpcap 1.10.7 update from OpenWrt main (b36d01c696); the
+openwrt-25.12 branch still ships 1.10.6. It fixes CVE-2026-0799,
+CVE-2026-31911, CVE-2026-31912, CVE-2026-6244 and CVE-2026-6554 in
+the BPF interpreter. The soname libpcap.so.1 is unchanged.
+
+---
+ package/libs/libpcap/Makefile                             | 6 +++---
+ package/libs/libpcap/patches/100-no-openssl.patch         | 2 +-
+ package/libs/libpcap/patches/102-skip-manpages.patch      | 2 +-
+ .../300-Add-support-for-B.A.T.M.A.N.-Advanced.patch       | 8 ++++----
+ 4 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/package/libs/libpcap/Makefile b/package/libs/libpcap/Makefile
+index f0ab511d4a..0209174925 100644
+--- a/package/libs/libpcap/Makefile
++++ b/package/libs/libpcap/Makefile
+@@ -8,12 +8,12 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=libpcap
+-PKG_VERSION:=1.10.6
++PKG_VERSION:=1.10.7
+ PKG_RELEASE:=1
+ 
+-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
++PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
+ PKG_SOURCE_URL:=https://www.tcpdump.org/release/
+-PKG_HASH:=872dd11337fe1ab02ad9d4fee047c9da244d695c6ddf34e2ebb733efd4ed8aa9
++PKG_HASH:=68fa62cffb974f4275641ce14c2e2d75739251f30e00e6a0900903b247d76a03
+ 
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+ PKG_LICENSE:=BSD-3-Clause
+diff --git a/package/libs/libpcap/patches/100-no-openssl.patch b/package/libs/libpcap/patches/100-no-openssl.patch
+index 6b17f00eea..b420a4bed2 100644
+--- a/package/libs/libpcap/patches/100-no-openssl.patch
++++ b/package/libs/libpcap/patches/100-no-openssl.patch
+@@ -1,6 +1,6 @@
+ --- a/CMakeLists.txt
+ +++ b/CMakeLists.txt
+-@@ -1470,7 +1470,6 @@ if(ENABLE_REMOTE)
++@@ -1466,7 +1466,6 @@ if(ENABLE_REMOTE)
+    #
+    # OpenSSL/libressl.
+    #
+diff --git a/package/libs/libpcap/patches/102-skip-manpages.patch b/package/libs/libpcap/patches/102-skip-manpages.patch
+index 171a672802..714e3bf7a4 100644
+--- a/package/libs/libpcap/patches/102-skip-manpages.patch
++++ b/package/libs/libpcap/patches/102-skip-manpages.patch
+@@ -9,7 +9,7 @@ Subject: [PATCH] skip manpages
+ 
+ --- a/CMakeLists.txt
+ +++ b/CMakeLists.txt
+-@@ -3575,57 +3575,6 @@ if(NOT MSVC)
++@@ -3571,57 +3571,6 @@ if(NOT MSVC)
+      if(MINGW)
+          find_program(LINK_EXECUTABLE ln)
+      endif(MINGW)
+diff --git a/package/libs/libpcap/patches/300-Add-support-for-B.A.T.M.A.N.-Advanced.patch b/package/libs/libpcap/patches/300-Add-support-for-B.A.T.M.A.N.-Advanced.patch
+index 1ffd650c39..002198a1d8 100644
+--- a/package/libs/libpcap/patches/300-Add-support-for-B.A.T.M.A.N.-Advanced.patch
++++ b/package/libs/libpcap/patches/300-Add-support-for-B.A.T.M.A.N.-Advanced.patch
+@@ -429,7 +429,7 @@ Signed-off-by: Linus Lüssing <linus.luessing@c0d3.blue>
+  %token  ISO ESIS CLNP ISIS L1 L2 IIH LSP SNP CSNP PSNP
+  %token  STP
+  %token  IPX
+-@@ -685,11 +686,40 @@ other:	  pqual TK_BROADCAST	{ CHECK_PTR_
++@@ -686,11 +687,40 @@ other:	  pqual TK_BROADCAST	{ CHECK_PTR_
+  	| PPPOES		{ CHECK_PTR_VAL(($$ = gen_pppoes(cstate, 0, 0))); }
+  	| GENEVE pnum		{ CHECK_PTR_VAL(($$ = gen_geneve(cstate, $2, 1))); }
+  	| GENEVE		{ CHECK_PTR_VAL(($$ = gen_geneve(cstate, 0, 0))); }
+@@ -564,7 +564,7 @@ Signed-off-by: Linus Lüssing <linus.luessing@c0d3.blue>
+  .BR sctp ,
+  .B tcp
+  and
+-@@ -400,7 +401,7 @@ True if the packet is an IPv6 multicast
++@@ -399,7 +400,7 @@ True if the packet is an IPv6 multicast
+  .IP  "\fBether proto \fIprotocol\fR"
+  True if the packet is of ether type \fIprotocol\fR.
+  \fIProtocol\fP can be a number or one of the names
+@@ -573,7 +573,7 @@ Signed-off-by: Linus Lüssing <linus.luessing@c0d3.blue>
+  \fBipx\fP, \fBiso\fP, \fBlat\fP, \fBloopback\fP, \fBmopdl\fP, \fBmoprc\fP, \fBnetbeui\fP,
+  \fBrarp\fP, \fBsca\fP or \fBstp\fP.
+  Note these identifiers (except \fBloopback\fP) are also keywords
+-@@ -454,7 +455,7 @@ the filter checks for the IPX etype in a
++@@ -453,7 +454,7 @@ the filter checks for the IPX etype in a
+  DSAP in the LLC header, the 802.3-with-no-LLC-header encapsulation of
+  IPX, and the IPX etype in a SNAP frame.
+  .RE
+@@ -582,7 +582,7 @@ Signed-off-by: Linus Lüssing <linus.luessing@c0d3.blue>
+  Abbreviations for:
+  .in +.5i
+  .nf
+-@@ -795,6 +796,36 @@ For example:
++@@ -794,6 +795,36 @@ For example:
+  filters IPv4 protocol encapsulated in Geneve with VNI 0xb. This will
+  match both IPv4 directly encapsulated in Geneve as well as IPv4 contained
+  inside an Ethernet frame.
+-- 
+2.51.0

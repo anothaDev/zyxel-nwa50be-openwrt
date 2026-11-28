@@ -1,0 +1,32 @@
+From: NWA50BE OpenWrt Project <noreply@invalid.example>
+Subject: [PATCH] uhttpd: update past realm bypass and ubus list fixes
+SPDX-License-Identifier: GPL-2.0-only
+
+Update uhttpd to the 2026-10-19 revision selected by OpenWrt main
+20c44f41b2ba. It adds 3aa7e1c7678 (GHSA-5cgm-8h9x-v28c, Basic Auth realms
+for URL-prefix handlers) and 64dcf47aa7f8, which rejects non-string ubus
+"list" params that caused a pre-auth out-of-bounds read.
+
+---
+ package/network/services/uhttpd/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/package/network/services/uhttpd/Makefile b/package/network/services/uhttpd/Makefile
+index 11bad77..f01eea7 100644
+--- a/package/network/services/uhttpd/Makefile
++++ b/package/network/services/uhttpd/Makefile
+@@ -12,9 +12,9 @@ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/uhttpd.git
+-PKG_SOURCE_DATE:=2026-08-03
+-PKG_SOURCE_VERSION:=60f64bec40c8113cf09815ec377761b1f4f95f22
+-PKG_MIRROR_HASH:=702b8df1ba868db13ae93b28ddaa9c421bcbfa34e8633cae984029e7b50ec59f
++PKG_SOURCE_DATE:=2026-10-19
++PKG_SOURCE_VERSION:=ca796d7dec5697a2d1a7a42be79677f239b64282
++PKG_MIRROR_HASH:=6a2fbcc0dbd3f6c9d076037f23b8544356487aea6b00d2a82a3591b09ba4a8e4
+ PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
+ PKG_LICENSE:=ISC
+ 
+-- 
+2.51.0

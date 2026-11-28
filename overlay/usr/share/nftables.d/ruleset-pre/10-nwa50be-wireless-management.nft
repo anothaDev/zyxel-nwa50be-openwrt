@@ -1,11 +1,23 @@
 destroy table bridge nwa50be_management
+destroy table netdev nwa50be_mark
+destroy table inet nwa50be_gate
 
-table bridge nwa50be_management {
+# The bridge-family input hook never sees host-bound frames on this platform,
+# so wired ingress is tagged at the earliest eth0 hook instead. Any inbound
+# mark bit is cleared first, then SSH and HTTPS from eth0 are tagged.
+table netdev nwa50be_mark {
+	chain ingress {
+		type filter hook ingress device eth0 priority -500; policy accept;
+		meta mark set meta mark & 0xbfffffff
+		tcp dport { 22, 443 } meta mark set meta mark | 0x40000000
+	}
+}
+
+# Untagged management traffic, including anything from Wi-Fi bridge ports
+# with a spoofed trusted source, is dropped before the fw4 input chain.
+table inet nwa50be_gate {
 	chain input {
-		type filter hook input priority -200; policy accept;
-
-		# eth0 is the sole supported wired uplink. Deny any other bridge
-		# ingress, including renamed Wi-Fi and MLO interfaces.
-		iifname != "eth0" drop comment "AP management requires wired ingress"
+		type filter hook input priority -10; policy accept;
+		tcp dport { 22, 443 } meta mark & 0x40000000 == 0 drop comment "AP management requires wired ingress"
 	}
 }

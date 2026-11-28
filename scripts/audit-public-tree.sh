@@ -38,11 +38,13 @@ forbidden_files=$(find "$project" \
 	exit 1
 }
 
-if grep -RIE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
+# Upstream dropbear fuzzer code in patch 0029 uses a fixed example path.
+upstream_example='"/home/me/authorized_keys"'
+if grep -RIhE --exclude-dir=.git --exclude-dir=work --exclude-dir=artifacts \
 	--exclude='audit-public-tree.sh' \
 	--exclude='verify-artifacts.sh' \
 	"$private_pattern" \
-	"$project" >/dev/null; then
+	"$project" | sed "s|$upstream_example||g" | grep -Eq "$private_pattern"; then
 	echo 'Refusing: private identity, key, path, or token material found.' >&2
 	exit 1
 fi
@@ -66,7 +68,7 @@ if command -v git >/dev/null 2>&1 && \
 	if git -C "$project" log --all -p -- . \
 		':(exclude)scripts/audit-public-tree.sh' \
 		':(exclude)scripts/verify-artifacts.sh' | \
-		grep -Ea "$private_pattern" >/dev/null; then
+		grep -Ea "$private_pattern" | sed "s|$upstream_example||g" | grep -Eaq "$private_pattern"; then
 		echo 'Refusing: Git history contains private identity, key, path, or token material.' >&2
 		exit 1
 	fi
